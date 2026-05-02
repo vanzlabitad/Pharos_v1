@@ -37,16 +37,16 @@ def get_engine(db_path: str | Path | None = None) -> Engine:
 
 
 def create_tables(engine: Engine) -> None:
-    """Execute schema.sql against the database. Idempotent (IF NOT EXISTS)."""
+    """Execute schema.sql against the database. Idempotent (IF NOT EXISTS).
+
+    Uses the underlying sqlite3 executescript() so comments and multi-statement
+    files are handled correctly without manual semicolon splitting.
+    """
     sql = _SCHEMA_PATH.read_text(encoding="utf-8")
     with engine.connect() as conn:
-        # SQLite allows multiple statements when issued via executescript-style;
-        # split on ";" and execute each non-empty statement individually.
-        for statement in sql.split(";"):
-            statement = statement.strip()
-            if statement:
-                conn.execute(text(statement))
-        conn.commit()
+        # executescript() handles multi-statement SQL files natively and
+        # commits automatically — do not call conn.commit() after this.
+        conn.connection.executescript(sql)
     logger.info("Tables created (or already exist)")
 
 
