@@ -1,0 +1,88 @@
+"""SQLite interface for Pharos using SQLAlchemy Core.
+
+All functions accept an Engine as the first argument — callers control
+the connection lifecycle; there is no hidden global state.
+"""
+
+import logging
+from pathlib import Path
+
+import pandas as pd
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+_SCHEMA_PATH = Path(__file__).parent.parent / "db" / "schema.sql"
+
+
+def get_engine(db_path: str | Path | None = None) -> Engine:
+    """Return a SQLAlchemy engine for the given SQLite path.
+
+    If db_path is None, falls back to the DB_PATH env var, then to db/pharos.db.
+    Creates the parent directory if it doesn't exist.
+    """
+    import os
+
+    if db_path is None:
+        db_path = os.getenv("DB_PATH", "db/pharos.db")
+
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    return create_engine(f"sqlite:///{db_path}")
+
+
+def create_tables(engine: Engine) -> None:
+    """Execute schema.sql against the database. Idempotent (IF NOT EXISTS)."""
+    sql = _SCHEMA_PATH.read_text(encoding="utf-8")
+    with engine.connect() as conn:
+        # SQLite allows multiple statements when issued via executescript-style;
+        # split on ";" and execute each non-empty statement individually.
+        for statement in sql.split(";"):
+            statement = statement.strip()
+            if statement:
+                conn.execute(text(statement))
+        conn.commit()
+    logger.info("Tables created (or already exist)")
+
+
+def insert_adverse_events(engine: Engine, df: pd.DataFrame) -> int:
+    """Bulk-insert a cleaned adverse_events DataFrame. Returns row count inserted."""
+    if df.empty:
+        logger.warning("insert_adverse_events called with empty DataFrame — skipping")
+        return 0
+
+    expected = {"drug_name", "reaction", "outcome", "report_date", "serious", "source"}
+    missing = expected - set(df.columns)
+    if missing:
+        raise ValueError(f"DataFrame missing required columns: {missing}")
+
+    with engine.connect() as conn:
+        df.to_sql("adverse_events", conn, if_exists="append", index=False)
+        conn.commit()
+
+    logger.info("Inserted %d rows into adverse_events", len(df))
+    return len(df)
+
+
+def insert_signal_scores(engine: Engine, df: pd.DataFrame) -> int:
+    """Bulk-insert a signal_scores DataFrame. Returns row count inserted."""
+    if df.empty:
+        logger.warning("insert_signal_scores called with empty DataFrame — skipping")
+        return 0
+
+    expected = {"drug_name", "reaction", "ror", "ror_lower", "ror_upper", "prr", "n_reports", "computed_date"}
+    missing = expected - set(df.columns)
+    if missing:
+        raise ValueError(f"DataFrame missing required columns: {missing}")
+
+    with engine.connect() as conn:
+        df.to_sql("signal_scores", conn, if_exists="append", index=False)
+        conn.commit()
+
+    logger.info("Inserted %d rows into signal_scores", len(df))
+    return len(df)
