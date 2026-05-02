@@ -140,6 +140,10 @@ def compute_all_signals(engine: Engine) -> pd.DataFrame:
             "prr": prr["prr"],
             "n_reports": a,
             "computed_date": today,
+            # chi_squared is not stored in signal_scores but is needed for
+            # flag_signal checks and the Quarto report. insert_signal_scores
+            # selects schema columns only, so this column is safe to include.
+            "chi_squared": prr["chi_squared"],
         })
 
     logger.info(

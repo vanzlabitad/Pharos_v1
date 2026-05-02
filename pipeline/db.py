@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 
 _SCHEMA_PATH = Path(__file__).parent.parent / "db" / "schema.sql"
 
+# Explicit column list so callers can pass DataFrames with extra columns
+# (e.g. chi_squared from compute_all_signals) without breaking the insert.
+_SIGNAL_SCORE_COLS = [
+    "drug_name", "reaction", "ror", "ror_lower", "ror_upper",
+    "prr", "n_reports", "computed_date",
+]
+
 
 def get_engine(db_path: str | Path | None = None) -> Engine:
     """Return a SQLAlchemy engine for the given SQLite path.
@@ -81,8 +88,24 @@ def insert_signal_scores(engine: Engine, df: pd.DataFrame) -> int:
         raise ValueError(f"DataFrame missing required columns: {missing}")
 
     with engine.connect() as conn:
-        df.to_sql("signal_scores", conn, if_exists="append", index=False)
+        df[_SIGNAL_SCORE_COLS].to_sql("signal_scores", conn, if_exists="append", index=False)
         conn.commit()
 
     logger.info("Inserted %d rows into signal_scores", len(df))
     return len(df)
+
+
+def clear_adverse_events(engine: Engine) -> None:
+    """Delete all rows from adverse_events. Used before a full re-ingest."""
+    with engine.connect() as conn:
+        conn.execute(text("DELETE FROM adverse_events"))
+        conn.commit()
+    logger.info("Cleared adverse_events")
+
+
+def clear_signal_scores(engine: Engine) -> None:
+    """Delete all rows from signal_scores. Used before recomputing signals."""
+    with engine.connect() as conn:
+        conn.execute(text("DELETE FROM signal_scores"))
+        conn.commit()
+    logger.info("Cleared signal_scores")
