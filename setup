@@ -1,0 +1,6 @@
+mkdir pharos
+cd pharos
+git init
+mkdir -p pipeline analysis db dashboard/.github/workflows data docs
+touch README.md
+cp /path/to/CLAUDE.md .
