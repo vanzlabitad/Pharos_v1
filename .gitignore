@@ -14,8 +14,8 @@ build/
 .venv/
 venv/
 
-# Data (large files)
-data/
+# Data (large raw files at project root only)
+/data/
 
 # Node / dashboard (added later)
 dashboard/node_modules/
