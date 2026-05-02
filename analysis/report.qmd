@@ -1,0 +1,347 @@
+---
+title: "Pharos — Adverse Drug Reaction Signal Detection"
+subtitle: "Disproportionality Analysis of OpenFDA FAERS Reports"
+date: today
+author: "Pharos Pipeline · OpenFDA FAERS data"
+format:
+  html:
+    embed-resources: true
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    code-fold: true
+    code-summary: "Show code"
+    fig-width: 9
+    fig-height: 5
+execute:
+  echo: false
+  warning: false
+  message: false
+jupyter: python3
+---
+
+```{python}
+#| label: setup
+#| include: false
+
+import sys
+from pathlib import Path
+from datetime import date
+
+# Make pipeline and analysis importable when Quarto runs from analysis/
+_root = Path("..").resolve()
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+from sqlalchemy import text
+
+from pipeline.db import get_engine
+from analysis.disproportionality import compute_all_signals
+
+# ── Load data ────────────────────────────────────────────────────────────────
+DB_PATH = _root / "db" / "pharos.db"
+engine = get_engine(DB_PATH)
+
+# Pull raw adverse event counts for the data summary section
+with engine.connect() as conn:
+    ae_counts = pd.read_sql(
+        text("SELECT drug_name, COUNT(*) AS n_reports FROM adverse_events GROUP BY drug_name ORDER BY n_reports DESC"),
+        conn,
+    )
+    ae_all = pd.read_sql(
+        text("SELECT drug_name, reaction FROM adverse_events"),
+        conn,
+    )
+
+# Recompute signals live — ensures chi_squared is available and report
+# always reflects the current state of adverse_events, not cached scores.
+signals = compute_all_signals(engine)
+
+# Flag signals: all four criteria from CLAUDE.md §8
+signals["is_signal"] = (
+    (signals["ror_lower"] > 1.0)
+    & (signals["prr"] >= 2.0)
+    & (signals["n_reports"] >= 3)
+    & (signals["chi_squared"] >= 4.0)
+)
+
+flagged = (
+    signals[signals["is_signal"]]
+    .sort_values("ror", ascending=False)
+    .reset_index(drop=True)
+)
+
+# Summary counts
+n_ae_total   = len(ae_all)
+n_drugs      = ae_counts["drug_name"].nunique()
+drug_list    = ae_counts["drug_name"].str.capitalize().tolist()
+n_pairs      = len(signals)
+n_flagged    = len(flagged)
+report_date  = date.today().strftime("%d %B %Y")
+
+# Consistent plot style
+plt.rcParams.update({
+    "axes.spines.top":    False,
+    "axes.spines.right":  False,
+    "axes.labelsize":     11,
+    "axes.titlesize":     12,
+    "xtick.labelsize":    9,
+    "ytick.labelsize":    9,
+    "figure.dpi":         120,
+})
+```
+
+## Introduction
+
+Pharmacovigilance is the science of monitoring drugs for safety problems after
+they reach the market. Spontaneous reporting systems — where healthcare
+professionals and patients submit voluntary reports of suspected adverse reactions
+— are the primary data source for post-market surveillance. The US FDA Adverse
+Event Reporting System (FAERS), served via the OpenFDA API, is the largest such
+database, containing millions of reports submitted since 1969.
+
+This report applies **disproportionality analysis** to a sample of FAERS data.
+The core question is: *does a given drug appear alongside a given adverse
+reaction more often than you would expect by chance, given how commonly that
+reaction is reported for all other drugs?* When the answer is yes — and the
+excess is statistically robust — that drug-reaction pair is flagged as a
+**safety signal** warranting further investigation. A signal is not a proven
+causal link; it is a statistical anomaly that prompts closer scrutiny.
+
+---
+
+## Methods
+
+### Data source
+
+Adverse event reports were fetched from the OpenFDA FAERS endpoint
+(`api.fda.gov/drug/event.json`) using the Pharos ingestion pipeline.
+Each report was exploded into one row per reaction, normalised to lowercase,
+deduplicated by safety report ID + reaction, and stored in a local SQLite
+database.
+
+```{python}
+#| echo: true
+#| code-summary: "Data summary"
+
+summary = pd.DataFrame({
+    "Item": ["Drugs analysed", "Total AE report-rows", "Drug-reaction pairs evaluated", "Signals flagged"],
+    "Value": [n_drugs, f"{n_ae_total:,}", f"{n_pairs:,}", n_flagged],
+})
+summary.index = [""] * len(summary)
+summary.style.hide(axis="index").set_properties(**{"text-align": "left"})
+```
+
+### Reporting Odds Ratio (ROR)
+
+For each drug **X** and reaction **Y**, a 2×2 contingency table is constructed:
+
+|  | Reaction Y | Other reactions |
+|--|:--:|:--:|
+| **Drug X** | *a* | *b* |
+| **All other drugs** | *c* | *d* |
+
+$$\text{ROR} = \frac{a/b}{c/d}$$
+
+The 95% confidence interval uses the log-normal approximation:
+
+$$\text{SE} = \sqrt{\frac{1}{a} + \frac{1}{b} + \frac{1}{c} + \frac{1}{d}}$$
+
+$$\text{CI} = \exp\!\left(\ln(\text{ROR}) \pm 1.96 \cdot \text{SE}\right)$$
+
+**Signal threshold:** ROR lower 95% CI > 1 (strict).
+
+### Proportional Reporting Ratio (PRR)
+
+$$\text{PRR} = \frac{a\,/\,(a+b)}{c\,/\,(c+d)}$$
+
+The associated chi-squared statistic uses the exact Pearson formula with
+no Yates' continuity correction:
+
+$$\chi^2 = \frac{N \cdot (ad - bc)^2}{(a+b)(c+d)(a+c)(b+d)}$$
+
+**Signal thresholds:** PRR ≥ 2 **and** *n* ≥ 3 **and** χ² ≥ 4.
+
+### Zero-cell handling
+
+Pairs where any contingency cell equals zero are excluded from analysis.
+Zero cells make the log-normal SE undefined for ROR and produce degenerate
+PRR values. A Haldane correction (+0.5 to all cells) would recover these
+pairs but introduces bias; exclusion is the more conservative choice for MVP.
+
+---
+
+## Results
+
+### Flagged signals
+
+A drug-reaction pair is flagged when **all four criteria** are simultaneously
+met: ROR lower CI > 1, PRR ≥ 2, n ≥ 3, χ² ≥ 4.
+
+```{python}
+#| label: tbl-signals
+#| tbl-cap: !expr paste("Flagged drug-reaction signals (n =", n_flagged, "), sorted by ROR descending")
+
+display_cols = ["drug_name", "reaction", "ror", "ror_lower", "ror_upper", "prr", "chi_squared", "n_reports"]
+display_labels = {
+    "drug_name":  "Drug",
+    "reaction":   "Reaction",
+    "ror":        "ROR",
+    "ror_lower":  "95% CI lower",
+    "ror_upper":  "95% CI upper",
+    "prr":        "PRR",
+    "chi_squared":"χ²",
+    "n_reports":  "n",
+}
+
+tbl = (
+    flagged[display_cols]
+    .rename(columns=display_labels)
+    .style
+    .format({
+        "ROR":          "{:.2f}",
+        "95% CI lower": "{:.2f}",
+        "95% CI upper": "{:.2f}",
+        "PRR":          "{:.2f}",
+        "χ²":           "{:.1f}",
+    })
+    .set_properties(**{"font-size": "0.85em"})
+    .set_table_styles([
+        {"selector": "th", "props": [("background-color", "#f0f4f8"), ("font-weight", "bold")]},
+        {"selector": "tr:nth-child(even)", "props": [("background-color", "#f9fbfd")]},
+    ])
+    .hide(axis="index")
+)
+tbl
+```
+
+### ROR distribution
+
+The histogram below shows the distribution of ROR values across all
+`{python} n_pairs` evaluable drug-reaction pairs. Most pairs cluster near 1.0
+(no disproportionality); the long right tail contains the flagged signals.
+
+```{python}
+#| label: fig-ror-hist
+#| fig-cap: "Distribution of ROR values across all drug-reaction pairs. Dashed line marks ROR = 1 (null). Pairs with ROR > 20 are binned together at the right edge."
+
+ROR_CLIP = 20
+
+fig, ax = plt.subplots(figsize=(9, 4.5))
+
+plot_ror = signals["ror"].clip(upper=ROR_CLIP)
+ax.hist(plot_ror, bins=50, color="#4e8df5", edgecolor="white", linewidth=0.4, alpha=0.85)
+ax.axvline(1.0, color="#e05c5c", linestyle="--", linewidth=1.4, label="ROR = 1 (null)")
+
+# Annotate flagged region
+ax.axvspan(signals["ror_lower"].where(signals["is_signal"]).min() or 1,
+           ROR_CLIP, alpha=0.06, color="#f5a623", label="Signal region (indicative)")
+
+ax.set_xlabel("Reporting Odds Ratio (ROR)")
+ax.set_ylabel("Number of drug-reaction pairs")
+ax.set_title("ROR distribution across all evaluated pairs")
+ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+
+### Top reactions per drug
+
+The charts below show the ten most frequently reported adverse reactions for
+each drug in the current dataset (ranked by raw report count, not by signal
+strength).
+
+```{python}
+#| label: fig-top-reactions
+#| fig-cap: "Top 10 adverse reactions per drug by report count."
+
+drugs_in_data = sorted(ae_all["drug_name"].unique())
+n_drugs_plot  = len(drugs_in_data)
+fig, axes = plt.subplots(1, n_drugs_plot, figsize=(9 * min(n_drugs_plot, 2) / 2 * 1.5, 5),
+                          sharey=False)
+
+if n_drugs_plot == 1:
+    axes = [axes]
+
+colours = ["#4e8df5", "#f5a623", "#50c878", "#e05c5c", "#9b59b6"]
+
+for i, (drug, ax) in enumerate(zip(drugs_in_data, axes)):
+    top = (
+        ae_all[ae_all["drug_name"] == drug]["reaction"]
+        .value_counts()
+        .head(10)
+        .iloc[::-1]   # reverse so highest is at top
+    )
+    colour = colours[i % len(colours)]
+    ax.barh(top.index, top.values, color=colour, alpha=0.85, edgecolor="white")
+    ax.set_title(drug.capitalize(), fontsize=12, fontweight="bold")
+    ax.set_xlabel("Report count")
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+
+plt.suptitle("Top 10 reactions by report count per drug", y=1.01, fontsize=13)
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Limitations
+
+- **Voluntary reporting bias.** FAERS data is submitted spontaneously — serious,
+  novel, or widely-publicised reactions are over-reported relative to their true
+  incidence. Disproportionality signals reflect the reporting rate, not the
+  underlying pharmacological risk.
+
+- **MedDRA term inconsistency.** Adverse reaction terms are entered as free text
+  and normalised to MedDRA preferred terms by OpenFDA. The same clinical event
+  may appear under multiple terms (e.g. "bleeding" vs "haemorrhage"), leading
+  to undercounting. No MedDRA synonym mapping has been applied in this analysis.
+
+- **No causality inference.** A flagged signal indicates that a drug-reaction
+  pair is reported more often than expected given the background rate. It does
+  not establish that the drug *caused* the reaction. Confounding by indication,
+  co-medications, and patient demographics are not controlled for.
+
+- **Small background population.** The current database contains reports for
+  only `{python} n_drugs` drugs (`{python} ', '.join(drug_list)`).
+  Disproportionality estimates are most reliable when the background population
+  is large and diverse. Signals computed against a narrow background are
+  statistically noisier and should be interpreted cautiously.
+
+---
+
+## Reproducibility
+
+This report was generated on **`{python} report_date`** from data stored in
+`db/pharos.db`. All signals are recomputed at render time from the raw
+`adverse_events` table — no pre-cached values are used.
+
+To regenerate:
+
+```bash
+# 1. Refresh the database (fetches latest OpenFDA data)
+python pipeline/run_refresh.py
+
+# 2. Render this report
+quarto render analysis/report.qmd
+```
+
+**Software versions** (captured at render time):
+
+```{python}
+#| echo: true
+#| code-summary: "Session info"
+
+import importlib, platform
+
+libs = ["pandas", "sqlalchemy", "scipy", "matplotlib"]
+rows = [(lib, importlib.import_module(lib).__version__) for lib in libs]
+rows.insert(0, ("python", platform.python_version()))
+
+pd.DataFrame(rows, columns=["Package", "Version"]).style.hide(axis="index")
+```

@@ -17,6 +17,11 @@ venv/
 # Data (large raw files at project root only)
 /data/
 
+# Quarto rendered outputs — regenerated on demand, not committed
+analysis/report.html
+analysis/*_files/
+.quarto/
+
 # Node / dashboard (added later)
 dashboard/node_modules/
 dashboard/.next/
