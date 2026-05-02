@@ -24,6 +24,10 @@ import logging
 import sys
 from pathlib import Path
 
+# Allow `python pipeline/run_refresh.py` from the project root by ensuring
+# the project root is on sys.path regardless of invocation style.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from pipeline.db import (
     get_engine,
     create_tables,
