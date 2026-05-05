@@ -4,12 +4,13 @@ All functions accept an Engine as the first argument — callers control
 the connection lifecycle; there is no hidden global state.
 """
 
+import json
 import logging
 from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 
 load_dotenv()
@@ -17,12 +18,11 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 _SCHEMA_PATH = Path(__file__).parent.parent / "db" / "schema.sql"
+_ALIASES_PATH = Path(__file__).parent / "drug_aliases.json"
 
-# Explicit column list so callers can pass DataFrames with extra columns
-# (e.g. chi_squared from compute_all_signals) without breaking the insert.
 _SIGNAL_SCORE_COLS = [
     "drug_name", "reaction", "ror", "ror_lower", "ror_upper",
-    "prr", "n_reports", "computed_date",
+    "prr", "chi_squared", "n_reports", "computed_date",
 ]
 
 
@@ -30,7 +30,9 @@ def get_engine(db_path: str | Path | None = None) -> Engine:
     """Return a SQLAlchemy engine for the given SQLite path.
 
     If db_path is None, falls back to the DB_PATH env var, then to db/pharos.db.
-    Creates the parent directory if it doesn't exist.
+    Creates the parent directory if it doesn't exist. Also installs a
+    connect-time hook that runs ``PRAGMA foreign_keys = ON`` on every new
+    connection — SQLite ignores FK constraints otherwise.
     """
     import os
 
@@ -40,7 +42,15 @@ def get_engine(db_path: str | Path | None = None) -> Engine:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    return create_engine(f"sqlite:///{db_path}")
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    @event.listens_for(engine, "connect")
+    def _enable_foreign_keys(dbapi_conn, _conn_record):  # noqa: ANN001
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.close()
+
+    return engine
 
 
 def create_tables(engine: Engine) -> None:
@@ -58,7 +68,11 @@ def create_tables(engine: Engine) -> None:
 
 
 def insert_adverse_events(engine: Engine, df: pd.DataFrame) -> int:
-    """Bulk-insert a cleaned adverse_events DataFrame. Returns row count inserted."""
+    """Bulk-insert a cleaned adverse_events DataFrame. Returns row count inserted.
+
+    Ensures every distinct ``drug_name`` exists in ``drugs(name)`` first so
+    that the FK constraint on adverse_events.drug_name is satisfied.
+    """
     if df.empty:
         logger.warning("insert_adverse_events called with empty DataFrame — skipping")
         return 0
@@ -68,11 +82,20 @@ def insert_adverse_events(engine: Engine, df: pd.DataFrame) -> int:
     if missing:
         raise ValueError(f"DataFrame missing required columns: {missing}")
 
+    distinct_drugs = sorted(set(df["drug_name"].dropna().unique()))
     with engine.connect() as conn:
+        for name in distinct_drugs:
+            conn.execute(
+                text("INSERT OR IGNORE INTO drugs (name) VALUES (:name)"),
+                {"name": name},
+            )
         df.to_sql("adverse_events", conn, if_exists="append", index=False)
         conn.commit()
 
-    logger.info("Inserted %d rows into adverse_events", len(df))
+    logger.info(
+        "Inserted %d rows into adverse_events (across %d drug names)",
+        len(df), len(distinct_drugs),
+    )
     return len(df)
 
 
@@ -82,7 +105,7 @@ def insert_signal_scores(engine: Engine, df: pd.DataFrame) -> int:
         logger.warning("insert_signal_scores called with empty DataFrame — skipping")
         return 0
 
-    expected = {"drug_name", "reaction", "ror", "ror_lower", "ror_upper", "prr", "n_reports", "computed_date"}
+    expected = set(_SIGNAL_SCORE_COLS)
     missing = expected - set(df.columns)
     if missing:
         raise ValueError(f"DataFrame missing required columns: {missing}")
@@ -93,6 +116,48 @@ def insert_signal_scores(engine: Engine, df: pd.DataFrame) -> int:
 
     logger.info("Inserted %d rows into signal_scores", len(df))
     return len(df)
+
+
+def seed_drug_aliases(engine: Engine) -> int:
+    """Seed the drug_aliases table from pipeline/drug_aliases.json.
+
+    Idempotent: uses INSERT OR REPLACE so re-running picks up edits to the
+    JSON file. Each canonical_name is also upserted into ``drugs`` to keep
+    the FK from drug_aliases satisfied.
+    """
+    if not _ALIASES_PATH.exists():
+        logger.warning("Alias file %s missing — skipping seed", _ALIASES_PATH)
+        return 0
+
+    with _ALIASES_PATH.open(encoding="utf-8") as f:
+        raw: dict[str, str] = json.load(f)
+
+    pairs = [
+        (alias.lower().strip(), canonical.lower().strip())
+        for alias, canonical in raw.items()
+    ]
+    canonical_names = sorted({c for _, c in pairs})
+
+    with engine.connect() as conn:
+        for name in canonical_names:
+            conn.execute(
+                text("INSERT OR IGNORE INTO drugs (name) VALUES (:name)"),
+                {"name": name},
+            )
+        for alias, canonical in pairs:
+            conn.execute(
+                text(
+                    "INSERT OR REPLACE INTO drug_aliases (alias, canonical_name) "
+                    "VALUES (:alias, :canonical)"
+                ),
+                {"alias": alias, "canonical": canonical},
+            )
+        conn.commit()
+
+    logger.info(
+        "Seeded %d alias rows across %d canonical drugs", len(pairs), len(canonical_names),
+    )
+    return len(pairs)
 
 
 def clear_adverse_events(engine: Engine) -> None:
