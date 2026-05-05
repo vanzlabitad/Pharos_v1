@@ -1,8 +1,14 @@
 # Database
 db/pharos.db
 
-# Environment
+# Environment — catch every variant so secrets cannot accidentally land
+# anywhere in the tree. The Next.js conventions (.env.local, .env.production
+# etc.) are particularly easy to commit because they look like config files.
 .env
+.env.*
+*.env
+!.env.example
+dashboard/.env*
 
 # Python
 __pycache__/
@@ -25,3 +31,7 @@ analysis/*_files/
 # Node / dashboard (added later)
 dashboard/node_modules/
 dashboard/.next/
+
+# Session handover docs — local working notes, not for the public repo
+HANDOFF.md
+HANDOFF-*.md
