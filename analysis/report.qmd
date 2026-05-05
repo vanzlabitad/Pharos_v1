@@ -14,6 +14,15 @@ format:
     code-summary: "Show code"
     fig-width: 9
     fig-height: 5
+    other-links:
+      - text: "Download PDF"
+        href: "report.pdf"
+        icon: download
+  typst:
+    toc: true
+    toc-depth: 3
+    fig-width: 7
+    fig-height: 4
 execute:
   echo: false
   warning: false
@@ -132,7 +141,6 @@ summary = pd.DataFrame({
     "Item": ["Drugs analysed", "Total AE report-rows", "Drug-reaction pairs evaluated", "Signals flagged"],
     "Value": [n_drugs, f"{n_ae_total:,}", f"{n_pairs:,}", n_flagged],
 })
-summary.index = [""] * len(summary)
 summary.style.hide(axis="index").set_properties(**{"text-align": "left"})
 ```
 
