@@ -17,7 +17,10 @@ import math
 import pytest
 import pandas as pd
 
+from sqlalchemy import create_engine
+
 from analysis.disproportionality import (
+    compute_all_signals,
     compute_ror,
     compute_prr,
     flag_signal,
@@ -92,17 +95,46 @@ class TestRORFromCounts:
         result = _ror_from_counts(A, B, C, D)
         assert result["n_reports"] == A
 
-    def test_zero_a_returns_none(self):
-        assert _ror_from_counts(0, B, C, D) is None
+    def test_zero_a_returns_none_strict(self):
+        assert _ror_from_counts(0, B, C, D, continuity_correction=False) is None
 
-    def test_zero_b_returns_none(self):
-        assert _ror_from_counts(A, 0, C, D) is None
+    def test_zero_b_returns_none_strict(self):
+        assert _ror_from_counts(A, 0, C, D, continuity_correction=False) is None
 
-    def test_zero_c_returns_none(self):
-        assert _ror_from_counts(A, B, 0, D) is None
+    def test_zero_c_returns_none_strict(self):
+        assert _ror_from_counts(A, B, 0, D, continuity_correction=False) is None
 
-    def test_zero_d_returns_none(self):
-        assert _ror_from_counts(A, B, C, 0) is None
+    def test_zero_d_returns_none_strict(self):
+        assert _ror_from_counts(A, B, C, 0, continuity_correction=False) is None
+
+    def test_zero_a_with_correction_returns_finite(self):
+        result = _ror_from_counts(0, B, C, D)  # default: correction on
+        assert result is not None
+        assert math.isfinite(result["ror"])
+        assert result["n_reports"] == 0  # observed a, not corrected
+
+    def test_zero_b_with_correction_returns_finite(self):
+        result = _ror_from_counts(A, 0, C, D)
+        assert result is not None
+        assert math.isfinite(result["ror"])
+
+    def test_zero_c_with_correction_returns_finite(self):
+        result = _ror_from_counts(A, B, 0, D)
+        assert result is not None
+        assert math.isfinite(result["ror"])
+
+    def test_zero_d_with_correction_returns_finite(self):
+        result = _ror_from_counts(A, B, C, 0)
+        assert result is not None
+        assert math.isfinite(result["ror"])
+
+    def test_drug_absent_returns_none_even_with_correction(self):
+        """a + b == 0 → drug entirely absent. Yates does not rescue this."""
+        assert _ror_from_counts(0, 0, C, D) is None
+
+    def test_no_comparator_returns_none_even_with_correction(self):
+        """c + d == 0 → no comparator drugs. Yates does not rescue this."""
+        assert _ror_from_counts(A, B, 0, 0) is None
 
     def test_via_public_api(self):
         df = _make_df(A, B, C, D)
@@ -111,6 +143,7 @@ class TestRORFromCounts:
         assert math.isclose(result["ror"], (A / B) / (C / D), rel_tol=1e-9)
 
     def test_via_public_api_unknown_drug_returns_none(self):
+        """Unknown drug → a + b == 0 → returns None regardless of correction."""
         df = _make_df(A, B, C, D)
         assert compute_ror(df, "unknown_drug", "reaction_y") is None
 
@@ -147,11 +180,34 @@ class TestPRRFromCounts:
         result = _prr_from_counts(A, B, C, D)
         assert result["n_reports"] == A
 
-    def test_zero_a_returns_none(self):
-        assert _prr_from_counts(0, B, C, D) is None
+    def test_zero_a_returns_none_strict(self):
+        assert _prr_from_counts(0, B, C, D, continuity_correction=False) is None
 
-    def test_zero_b_returns_none(self):
-        assert _prr_from_counts(A, 0, C, D) is None
+    def test_zero_b_returns_none_strict(self):
+        assert _prr_from_counts(A, 0, C, D, continuity_correction=False) is None
+
+    def test_zero_c_returns_none_strict(self):
+        assert _prr_from_counts(A, B, 0, D, continuity_correction=False) is None
+
+    def test_zero_d_returns_none_strict(self):
+        assert _prr_from_counts(A, B, C, 0, continuity_correction=False) is None
+
+    def test_zero_a_with_correction_returns_finite(self):
+        result = _prr_from_counts(0, B, C, D)  # default: correction on
+        assert result is not None
+        assert math.isfinite(result["prr"])
+        assert math.isfinite(result["chi_squared"])
+
+    def test_zero_c_with_correction_returns_finite(self):
+        result = _prr_from_counts(A, B, 0, D)
+        assert result is not None
+        assert math.isfinite(result["prr"])
+
+    def test_drug_absent_returns_none_even_with_correction(self):
+        assert _prr_from_counts(0, 0, C, D) is None
+
+    def test_no_comparator_returns_none_even_with_correction(self):
+        assert _prr_from_counts(A, B, 0, 0) is None
 
     def test_via_public_api(self):
         df = _make_df(A, B, C, D)
@@ -251,3 +307,69 @@ class TestFlagSignal:
     def test_only_prr_fails_is_not_signal(self):
         prr = {**self._prr_pass, "prr": 1.0}
         assert flag_signal(self._ror_pass, prr) is False
+
+
+# ── compute_all_signals ──────────────────────────────────────────────────────
+
+class TestComputeAllSignals:
+    """End-to-end behaviour of the batch signal computation against an
+    in-memory SQLite database. Verifies the EVANS-criterion ``min_reports``
+    floor and continuity-correction flag are honoured."""
+
+    @staticmethod
+    def _engine_with(df: pd.DataFrame):
+        """Spin up an in-memory SQLite engine pre-populated with rows."""
+        engine = create_engine("sqlite:///:memory:")
+        with engine.connect() as conn:
+            df.to_sql("adverse_events", conn, if_exists="replace", index=False)
+            conn.commit()
+        return engine
+
+    def test_empty_table_returns_empty_frame(self):
+        engine = self._engine_with(pd.DataFrame(columns=["drug_name", "reaction"]))
+        result = compute_all_signals(engine)
+        assert result.empty
+        assert "chi_squared" in result.columns
+
+    def test_min_reports_filters_low_count_pair(self):
+        # Two drugs, two reactions. drug_x/rxn_a has a=2; drug_x/rxn_b has a=4.
+        # With min_reports=3 (default), only the a=4 pair survives.
+        rows = (
+            [{"drug_name": "drug_x", "reaction": "rxn_a"}] * 2
+            + [{"drug_name": "drug_x", "reaction": "rxn_b"}] * 4
+            + [{"drug_name": "other", "reaction": "rxn_a"}] * 50
+            + [{"drug_name": "other", "reaction": "rxn_b"}] * 50
+        )
+        engine = self._engine_with(pd.DataFrame(rows))
+
+        result = compute_all_signals(engine)  # default min_reports=3
+        pairs = set(zip(result["drug_name"], result["reaction"]))
+        assert ("drug_x", "rxn_b") in pairs
+        assert ("drug_x", "rxn_a") not in pairs
+
+    def test_min_reports_one_includes_low_count_pair(self):
+        rows = (
+            [{"drug_name": "drug_x", "reaction": "rxn_a"}] * 2
+            + [{"drug_name": "drug_x", "reaction": "rxn_b"}] * 4
+            + [{"drug_name": "other", "reaction": "rxn_a"}] * 50
+            + [{"drug_name": "other", "reaction": "rxn_b"}] * 50
+        )
+        engine = self._engine_with(pd.DataFrame(rows))
+
+        result = compute_all_signals(engine, min_reports=1)
+        pairs = set(zip(result["drug_name"], result["reaction"]))
+        assert ("drug_x", "rxn_a") in pairs
+        assert ("drug_x", "rxn_b") in pairs
+
+    def test_chi_squared_in_output(self):
+        rows = (
+            [{"drug_name": "drug_x", "reaction": "rxn_a"}] * 10
+            + [{"drug_name": "other", "reaction": "rxn_a"}] * 5
+            + [{"drug_name": "other", "reaction": "rxn_b"}] * 95
+        )
+        engine = self._engine_with(pd.DataFrame(rows))
+
+        result = compute_all_signals(engine)
+        assert "chi_squared" in result.columns
+        # No zero cells here, so every chi_squared should be finite and positive.
+        assert (result["chi_squared"] > 0).all()

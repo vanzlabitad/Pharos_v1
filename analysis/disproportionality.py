@@ -18,8 +18,22 @@ PRR  = (a / (a+b)) / (c / (c+d))
   χ² = N·(ad − bc)² / [(a+b)(c+d)(a+c)(b+d)]   — exact Pearson, no Yates
   Signal thresholds: PRR ≥ 2 AND n ≥ 3 AND χ² ≥ 4
 
-All four public functions return None (rather than raising) when a cell is
-zero so callers can handle missing-data cases uniformly.
+Zero-cell handling (Rothman 2004, §15):
+  When any cell is zero, the log-SE is undefined and PRR is unstable. By
+  default this module applies Yates' 0.5 continuity correction — adds 0.5
+  to every cell — and returns finite estimates. Callers that need strict
+  behaviour (skip the pair entirely) pass ``continuity_correction=False``,
+  in which case the function returns None.
+
+  ``n_reports`` always reflects the *observed* a, not the corrected value.
+  This means a corrected pair with observed a < 3 will still fail the
+  EVANS-criterion floor in ``flag_signal``, so Yates does not promote noise
+  into signals.
+
+Cell-inclusion floor (Evans 2001):
+  ``compute_all_signals`` skips pairs with observed a < ``min_reports``
+  (default 3). This is the EVANS-criterion floor for PRR signal detection
+  and matches standard ROR practice.
 """
 
 import logging
@@ -35,36 +49,52 @@ logger = logging.getLogger(__name__)
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def compute_ror(df: pd.DataFrame, drug_name: str, reaction: str) -> dict | None:
+def compute_ror(
+    df: pd.DataFrame,
+    drug_name: str,
+    reaction: str,
+    *,
+    continuity_correction: bool = True,
+) -> dict | None:
     """Compute ROR and 95% CI for one drug-reaction pair.
 
     Args:
         df:        DataFrame with columns drug_name, reaction (at minimum).
         drug_name: Drug of interest.
         reaction:  Reaction of interest.
+        continuity_correction: If True (default), apply Yates' 0.5 correction
+            when any cell is zero. If False, return None on any zero cell.
 
     Returns:
         dict with keys ror, ror_lower, ror_upper, n_reports
-        or None if any contingency cell is zero (log-SE undefined).
+        or None if a zero cell is encountered with correction disabled.
     """
     a, b, c, d = _contingency_table(df, drug_name, reaction)
-    return _ror_from_counts(a, b, c, d)
+    return _ror_from_counts(a, b, c, d, continuity_correction=continuity_correction)
 
 
-def compute_prr(df: pd.DataFrame, drug_name: str, reaction: str) -> dict | None:
+def compute_prr(
+    df: pd.DataFrame,
+    drug_name: str,
+    reaction: str,
+    *,
+    continuity_correction: bool = True,
+) -> dict | None:
     """Compute PRR and chi-squared for one drug-reaction pair.
 
     Args:
         df:        DataFrame with columns drug_name, reaction (at minimum).
         drug_name: Drug of interest.
         reaction:  Reaction of interest.
+        continuity_correction: If True (default), apply Yates' 0.5 correction
+            when any cell is zero. If False, return None on any zero cell.
 
     Returns:
         dict with keys prr, chi_squared, n_reports
-        or None if any contingency cell is zero.
+        or None if a zero cell is encountered with correction disabled.
     """
     a, b, c, d = _contingency_table(df, drug_name, reaction)
-    return _prr_from_counts(a, b, c, d)
+    return _prr_from_counts(a, b, c, d, continuity_correction=continuity_correction)
 
 
 def flag_signal(ror_result: dict | None, prr_result: dict | None) -> bool:
@@ -86,29 +116,43 @@ def flag_signal(ror_result: dict | None, prr_result: dict | None) -> bool:
     )
 
 
-def compute_all_signals(engine: Engine) -> pd.DataFrame:
+def compute_all_signals(
+    engine: Engine,
+    *,
+    continuity_correction: bool = True,
+    min_reports: int = 3,
+) -> pd.DataFrame:
     """Compute ROR/PRR for every drug-reaction pair in adverse_events.
 
     Uses vectorised groupby counts rather than per-row DataFrame scans —
     precomputes pair, drug, and reaction totals once then resolves each
     2×2 table in O(1).
 
+    Args:
+        engine: SQLAlchemy engine bound to the Pharos database.
+        continuity_correction: If True (default), apply Yates' 0.5 correction
+            on zero-cell pairs rather than dropping them.
+        min_reports: Minimum observed ``a`` (drug-reaction co-occurrence) for
+            a pair to be computed at all. Defaults to 3, the EVANS-criterion
+            floor (Evans 2001) for stable PRR estimation. Pairs below this
+            floor are skipped, not corrected.
+
     Returns:
-        DataFrame with columns matching signal_scores schema (no id column):
-        drug_name, reaction, ror, ror_lower, ror_upper, prr, n_reports, computed_date
-        Pairs where any contingency cell is zero are dropped.
+        DataFrame with columns matching signal_scores schema:
+        drug_name, reaction, ror, ror_lower, ror_upper, prr,
+        chi_squared, n_reports, computed_date.
     """
     with engine.connect() as conn:
         df = pd.read_sql(
             text("SELECT drug_name, reaction FROM adverse_events"), conn
         )
 
+    cols = ["drug_name", "reaction", "ror", "ror_lower", "ror_upper",
+            "prr", "chi_squared", "n_reports", "computed_date"]
+
     if df.empty:
         logger.warning("adverse_events is empty — no signals to compute")
-        return pd.DataFrame(
-            columns=["drug_name", "reaction", "ror", "ror_lower", "ror_upper",
-                     "prr", "n_reports", "computed_date"]
-        )
+        return pd.DataFrame(columns=cols)
 
     n_total = len(df)
     pair_counts = df.groupby(["drug_name", "reaction"]).size()
@@ -116,19 +160,24 @@ def compute_all_signals(engine: Engine) -> pd.DataFrame:
     reaction_counts = df.groupby("reaction").size()
 
     rows = []
-    skipped = 0
+    skipped_low_count = 0
+    skipped_zero_cell = 0
     today = date.today()
 
     for (drug, rxn), a in pair_counts.items():
+        if a < min_reports:
+            skipped_low_count += 1
+            continue
+
         b = int(drug_counts[drug]) - a
         c = int(reaction_counts[rxn]) - a
         d = n_total - a - b - c
 
-        ror = _ror_from_counts(a, b, c, d)
-        prr = _prr_from_counts(a, b, c, d)
+        ror = _ror_from_counts(a, b, c, d, continuity_correction=continuity_correction)
+        prr = _prr_from_counts(a, b, c, d, continuity_correction=continuity_correction)
 
         if ror is None or prr is None:
-            skipped += 1
+            skipped_zero_cell += 1
             continue
 
         rows.append({
@@ -138,18 +187,16 @@ def compute_all_signals(engine: Engine) -> pd.DataFrame:
             "ror_lower": ror["ror_lower"],
             "ror_upper": ror["ror_upper"],
             "prr": prr["prr"],
+            "chi_squared": prr["chi_squared"],
             "n_reports": a,
             "computed_date": today,
-            # chi_squared is not stored in signal_scores but is needed for
-            # flag_signal checks and the Quarto report. insert_signal_scores
-            # selects schema columns only, so this column is safe to include.
-            "chi_squared": prr["chi_squared"],
         })
 
     logger.info(
-        "Computed signals for %d pairs; %d skipped (zero-cell)", len(rows), skipped
+        "Computed signals for %d pairs; %d skipped (a < %d), %d skipped (zero-cell, correction=%s)",
+        len(rows), skipped_low_count, min_reports, skipped_zero_cell, continuity_correction,
     )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=cols)
 
 
 # ── Private helpers ──────────────────────────────────────────────────────────
@@ -169,17 +216,33 @@ def _contingency_table(
     return a, b, c, d
 
 
-def _ror_from_counts(a: int, b: int, c: int, d: int) -> dict | None:
+def _ror_from_counts(
+    a: int, b: int, c: int, d: int, *, continuity_correction: bool = True
+) -> dict | None:
     """Compute ROR and 95% CI from raw (a, b, c, d).
 
-    Returns None when any cell is zero — log-normal SE is undefined.
-    """
-    if a == 0 or b == 0 or c == 0 or d == 0:
-        return None
+    When any cell is zero, log-normal SE is undefined. With
+    ``continuity_correction=True`` (default), 0.5 is added to every cell
+    before computing (Yates correction; Rothman 2004 §15). With False,
+    return None.
 
-    ror = (a / b) / (c / d)
+    Yates does not rescue "drug entirely absent" (a + b == 0) or "no
+    comparator" (c + d == 0); those return None regardless.
+
+    ``n_reports`` is always the observed ``a``, not the corrected value.
+    """
+    if a + b == 0 or c + d == 0:
+        return None
+    if a == 0 or b == 0 or c == 0 or d == 0:
+        if not continuity_correction:
+            return None
+        a_, b_, c_, d_ = a + 0.5, b + 0.5, c + 0.5, d + 0.5
+    else:
+        a_, b_, c_, d_ = a, b, c, d
+
+    ror = (a_ / b_) / (c_ / d_)
     log_ror = math.log(ror)
-    se = math.sqrt(1 / a + 1 / b + 1 / c + 1 / d)
+    se = math.sqrt(1 / a_ + 1 / b_ + 1 / c_ + 1 / d_)
 
     return {
         "ror": ror,
@@ -189,20 +252,34 @@ def _ror_from_counts(a: int, b: int, c: int, d: int) -> dict | None:
     }
 
 
-def _prr_from_counts(a: int, b: int, c: int, d: int) -> dict | None:
+def _prr_from_counts(
+    a: int, b: int, c: int, d: int, *, continuity_correction: bool = True
+) -> dict | None:
     """Compute PRR and Pearson chi-squared from raw (a, b, c, d).
 
-    Chi-squared uses the exact Pearson formula — no Yates' continuity correction.
-    Returns None when any cell is zero.
+    Chi-squared uses the exact Pearson formula. When any cell is zero and
+    ``continuity_correction`` is True (default), 0.5 is added to every cell
+    before computing (Rothman 2004 §15). With False, return None.
+
+    Yates does not rescue "drug entirely absent" (a + b == 0) or "no
+    comparator" (c + d == 0); those return None regardless.
+
+    ``n_reports`` is always the observed ``a``, not the corrected value.
     """
-    if a == 0 or b == 0 or c == 0 or d == 0:
+    if a + b == 0 or c + d == 0:
         return None
+    if a == 0 or b == 0 or c == 0 or d == 0:
+        if not continuity_correction:
+            return None
+        a_, b_, c_, d_ = a + 0.5, b + 0.5, c + 0.5, d + 0.5
+    else:
+        a_, b_, c_, d_ = a, b, c, d
 
-    prr = (a / (a + b)) / (c / (c + d))
+    prr = (a_ / (a_ + b_)) / (c_ / (c_ + d_))
 
-    n = a + b + c + d
-    chi_squared = (n * (a * d - b * c) ** 2) / (
-        (a + b) * (c + d) * (a + c) * (b + d)
+    n = a_ + b_ + c_ + d_
+    chi_squared = (n * (a_ * d_ - b_ * c_) ** 2) / (
+        (a_ + b_) * (c_ + d_) * (a_ + c_) * (b_ + d_)
     )
 
     return {
