@@ -65,7 +65,7 @@ Weekly GitHub Actions cron → static JSON export
     ↓
 Vercel (Next.js dashboard + Recharts)
          ↓
-Claude API (plain-language summaries, per drug profile)
+Gemini API (plain-language summaries, per drug profile)
 ```
 
 **No R. No dual-language split. One stack, one language.**
@@ -83,7 +83,7 @@ Claude API (plain-language summaries, per drug profile)
 | Refresh | GitHub Actions cron (weekly) → static JSON |
 | Frontend | Next.js + Recharts |
 | Deployment | Vercel (free tier) |
-| AI summaries | Claude API (`claude-sonnet-4-6` — pinned; can be re-pinned per refresh run) |
+| AI summaries | Gemini API (`gemini-2.5-flash` — pinned; can be re-pinned per refresh run) |
 
 ---
 
@@ -223,7 +223,7 @@ These are reproduced in the Quarto report alongside the signal outputs.
   - Drug search
   - Adverse event profile view
   - Signal score view (ROR/PRR with CI visualisation)
-  - **AI-generated plain-language summaries per drug profile (Claude API) — see §10**
+  - **AI-generated plain-language summaries per drug profile (Gemini API) — see §10**
 - [ ] Clean GitHub README with architecture diagram
 
 ### V2 (post-August)
@@ -245,32 +245,39 @@ data sits below it.
 ### Architecture (single path)
 Summaries are **generated during the GitHub Actions weekly refresh** and
 committed as static JSON alongside the signal data. The frontend reads JSON.
-**There is no runtime call to the Anthropic API from the browser** — the API
+**There is no runtime call to the Gemini API from the browser** — the API
 key never leaves the CI environment.
 
 Coverage heuristic: generate a summary for every drug with at least one
 flagged signal in the current refresh, capped at 200 drugs per refresh.
 
 ### Forbidden patterns (key safety)
-The Anthropic key is a server-only secret. The following are blocked by the
+The Gemini key is a server-only secret. The following are blocked by the
 pre-commit hook (`.githooks/pre-commit`) and the CI secret-scan workflow
 (`.github/workflows/secret-scan.yml`):
 
-- `NEXT_PUBLIC_ANTHROPIC*` — Next.js publishes any `NEXT_PUBLIC_*` env var
-  into the browser bundle. Using this prefix on the Anthropic key would
-  ship it to every user that loads the dashboard. Never use it.
-- `sk-ant-...` literals anywhere in committed code — the only places this
-  string may appear are docs explaining the rule and the scanner itself.
+- `NEXT_PUBLIC_GEMINI*` and `NEXT_PUBLIC_GOOGLE*` — Next.js publishes any
+  `NEXT_PUBLIC_*` env var into the browser bundle. Using either prefix on
+  the Gemini key would ship it to every user that loads the dashboard.
+  Never use them.
+- `AIza...` literals anywhere in committed code — Google API keys (Gemini
+  included) all start with this prefix. The only places this string may
+  appear are docs explaining the rule and the scanner itself.
 
-The Anthropic SDK is only ever imported from a Python module run inside
-GitHub Actions. The frontend has no Anthropic dependency, no Anthropic env
-var, and no API route that proxies the key. If a future feature needs more
-than pre-generated summaries, build a *server-side* Next.js API route that
-reads `ANTHROPIC_API_KEY` from the server runtime — never from the client.
+The scanner also blocks legacy Anthropic patterns (`sk-ant-*`,
+`NEXT_PUBLIC_ANTHROPIC*`) as a defensive layer, in case the project ever
+experiments with Claude alongside Gemini.
+
+The Gemini SDK (`google-generativeai`) is only ever imported from a Python
+module run inside GitHub Actions. The frontend has no Gemini dependency,
+no Gemini env var, and no API route that proxies the key. If a future
+feature needs more than pre-generated summaries, build a *server-side*
+Next.js API route that reads `GEMINI_API_KEY` from the server runtime —
+never from the client.
 
 Install the pre-commit hook locally with: `git config core.hooksPath .githooks`.
 
-**Example prompt (sent to Claude API at refresh time):**
+**Example prompt (sent to Gemini API at refresh time):**
 ```
 You are a plain-language medical writer. Given the following drug safety
 signal data, write a 2-3 sentence summary a non-scientist can understand.
@@ -302,7 +309,7 @@ Output only the summary. No preamble.
 - **Signal score view:** plain-language flag explanation alongside ROR CI chart.
 
 ### Technical notes
-- Model: `claude-sonnet-4-6` (pinned; re-pin at refresh time when upgrading).
+- Model: `gemini-2.5-flash` (pinned; re-pin at refresh time when upgrading).
 - Generated at refresh time only; cached in `dashboard/public/data/summaries.json`.
 - UI label on every summary card: *"AI-generated summary — for reference only, not medical advice."*
 
@@ -368,7 +375,7 @@ pharos/
 | Repo, schema, OpenFDA pipeline, ROR/PRR + Quarto, weekly cron + JSON export, unit tests | ✅ Completed May 2026 |
 | Methodology hardening (drug normalisation, Yates, min_reports, FAERS limitations) | June 2026 |
 | Frontend MVP deployed (Vercel) | June 2026 |
-| AI summaries integrated (Claude API, pre-generated at refresh) | July 2026 |
+| AI summaries integrated (Gemini API, pre-generated at refresh) | July 2026 |
 | README + architecture diagram | July 2026 |
 | Portfolio-ready (CV + LinkedIn) | August 2026 |
 
@@ -401,7 +408,7 @@ Recruiter-facing copy (CV framing, LinkedIn entry, signal table) lives in [`docs
 | OpenFDA 429 rate-limit | Low | Med | Exponential-backoff retry in `pipeline.ingest._fetch_page` (1s → 2s → 4s, then raise). |
 | `signals.json` size growth | Med | Med | EVANS floor (`min_reports = 3`) bounds row count; rotate to blob storage if file > 5 MB. |
 | Vercel deploy size cap | Low | High | Same trigger as JSON growth. Hard cap on free tier ~100 MB. |
-| Claude API monthly cost | Low | Low | Capped at ~200 summaries / refresh (§10). One-time cost per refresh. |
+| Gemini API monthly cost | Low | Low | Capped at ~200 summaries / refresh (§10). Free tier currently covers full weekly load; one-time cost per refresh if it ever exceeds. |
 | FAERS quarterly data lag | Cert. | Low | Dashboard footer states "data current to [latest receivedate]". |
 | Drug normalisation gaps | High | Med | Curated alias table in `pipeline/drug_aliases.json`; coverage tracked. RxNorm in V2. |
 | Background-denominator bias | Cert. | Med | Documented in §8 limitations; stratified analysis is V2. |
@@ -440,4 +447,4 @@ The Quarto report at [`analysis/report.qmd`](analysis/report.qmd) is the human-r
 | Refresh strategy | Weekly GitHub Actions → static JSON |
 | NLP in MVP | No — V2 only |
 | ClinicalTrials / PubMed in MVP | No — V2 only |
-| Plain-language summaries | Yes — Claude API, generated at refresh time (see §10) |
+| Plain-language summaries | Yes — Gemini API, generated at refresh time (see §10) |

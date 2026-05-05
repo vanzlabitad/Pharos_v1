@@ -21,11 +21,11 @@ behaviour rules. This file is for the human reader.
 > adverse drug reaction signals from OpenFDA data using disproportionality
 > analysis (ROR/PRR). Includes an ETL pipeline (Python/SQLite), reproducible
 > analysis layer (Quarto), interactive dashboard (Next.js), and AI-generated
-> plain-language summaries via Claude API. Deployed live with weekly
+> plain-language summaries via Gemini API. Deployed live with weekly
 > automated refresh via GitHub Actions."
 
 ## LinkedIn project entry
 
 - **Title:** Pharos — Pharmacovigilance Signal Detection Platform
 - **Link:** GitHub repo + live demo
-- **Key skills:** Python, SQL, REST APIs, Statistical Analysis, React/Next.js, GitHub Actions, Claude API
+- **Key skills:** Python, SQL, REST APIs, Statistical Analysis, React/Next.js, GitHub Actions, Gemini API

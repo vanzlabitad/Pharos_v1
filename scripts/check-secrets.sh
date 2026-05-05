@@ -2,9 +2,14 @@
 # Block secrets from being committed or merged.
 #
 # Patterns:
-#   sk-ant-[A-Za-z0-9_-]{20,}    — Anthropic API key prefix + body
-#   NEXT_PUBLIC_ANTHROPIC        — any Next.js public env var that would ship
-#                                  the Anthropic key to the browser bundle
+#   AIza[A-Za-z0-9_-]{35}            — Google API key prefix + body (Gemini,
+#                                       primary provider for AI summaries)
+#   NEXT_PUBLIC_(GEMINI|GOOGLE)      — any Next.js public env var that would
+#                                       ship the Gemini key to the browser
+#
+# Defensive layer (kept in case the project ever experiments with Claude):
+#   sk-ant-[A-Za-z0-9_-]{20,}        — Anthropic API key prefix + body
+#   NEXT_PUBLIC_ANTHROPIC            — Anthropic equivalent of the above
 #
 # Usage:
 #   scripts/check-secrets.sh --all                 # scan every tracked file (CI)
@@ -16,7 +21,7 @@
 set -euo pipefail
 
 # ── Forbidden patterns ──────────────────────────────────────────────────────
-PATTERN='(sk-ant-[A-Za-z0-9_-]{20,}|NEXT_PUBLIC_ANTHROPIC)'
+PATTERN='(AIza[A-Za-z0-9_-]{35}|sk-ant-[A-Za-z0-9_-]{20,}|NEXT_PUBLIC_(GEMINI|GOOGLE|ANTHROPIC))'
 
 # Files that are *allowed* to mention the forbidden patterns (docs, hook,
 # this script). One regex per line, anchored to the repo-relative path.
@@ -57,7 +62,8 @@ if (( ${#hits[@]} > 0 )); then
     echo "            .github/workflows/secret-scan.yml, .githooks/pre-commit" >&2
     echo "" >&2
     echo "If this is a real key: rotate it immediately at the provider console" >&2
-    echo "(https://console.anthropic.com/settings/keys), then remove from history." >&2
+    echo "(Gemini: https://aistudio.google.com/app/apikey ;" >&2
+    echo " Anthropic: https://console.anthropic.com/settings/keys), then remove from history." >&2
     exit 1
 fi
 
