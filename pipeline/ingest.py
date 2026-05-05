@@ -16,6 +16,8 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
+from pipeline.normalise import canonical
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,15 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "https://api.fda.gov/drug/event.json"
 _PAGE_SIZE = 1000   # OpenFDA maximum per request
 _REQUEST_TIMEOUT = 10   # seconds
+
+# Retry policy on HTTP 429 (rate limit). Three attempts with exponential
+# backoff (1s, 2s, 4s) before raising. Failure is loud — no partial-data
+# fallback — so the cron exits non-zero and GitHub Actions emails the user.
+_RATE_LIMIT_RETRY_DELAYS = (1, 2, 4)
+
+
+class RateLimitExceededError(RuntimeError):
+    """Raised when OpenFDA returns 429 after all retries are exhausted."""
 
 
 def fetch_adverse_events(drug_name: str, max_records: int = 5000) -> pd.DataFrame:
@@ -75,7 +86,12 @@ def fetch_adverse_events(drug_name: str, max_records: int = 5000) -> pd.DataFram
 def _fetch_page(
     drug_name: str, skip: int, limit: int, api_key: str
 ) -> list[dict] | None:
-    """Fetch one page of results. Returns list of row dicts, or None on failure."""
+    """Fetch one page of results. Returns list of row dicts, or None on failure.
+
+    On HTTP 429, retries with exponential backoff (1s → 2s → 4s) before
+    raising ``RateLimitExceededError``. Other failures (timeout, network,
+    non-2xx, malformed JSON) return None and stop pagination for this drug.
+    """
     params: dict = {
         "search": f'patient.drug.medicinalproduct:"{drug_name}"',
         "limit": limit,
@@ -84,28 +100,44 @@ def _fetch_page(
     if api_key:
         params["api_key"] = api_key
 
-    try:
-        response = requests.get(_BASE_URL, params=params, timeout=_REQUEST_TIMEOUT)
-    except requests.Timeout:
-        logger.warning(
-            "Timeout fetching page skip=%d for '%s' — stopping pagination",
-            skip, drug_name,
+    response = None
+    for attempt, delay in enumerate((0,) + _RATE_LIMIT_RETRY_DELAYS):
+        if delay:
+            logger.warning(
+                "OpenFDA 429 on '%s' (skip=%d) — retry %d/%d after %ds",
+                drug_name, skip, attempt, len(_RATE_LIMIT_RETRY_DELAYS), delay,
+            )
+            time.sleep(delay)
+
+        try:
+            response = requests.get(_BASE_URL, params=params, timeout=_REQUEST_TIMEOUT)
+        except requests.Timeout:
+            logger.warning(
+                "Timeout fetching page skip=%d for '%s' — stopping pagination",
+                skip, drug_name,
+            )
+            return None
+        except requests.RequestException as exc:
+            logger.warning(
+                "Network error fetching page skip=%d for '%s': %s",
+                skip, drug_name, exc,
+            )
+            return None
+
+        if response.status_code != 429:
+            break
+    else:
+        # Loop exhausted without breaking — every attempt was a 429.
+        raise RateLimitExceededError(
+            f"OpenFDA returned 429 for '{drug_name}' (skip={skip}) after "
+            f"{len(_RATE_LIMIT_RETRY_DELAYS)} retries"
         )
-        return None
-    except requests.RequestException as exc:
-        logger.warning(
-            "Network error fetching page skip=%d for '%s': %s",
-            skip, drug_name, exc,
-        )
-        return None
+
+    assert response is not None  # for type-checker; loop guarantees this
 
     if response.status_code == 404:
         logger.warning("OpenFDA returned 404 for drug '%s' — no results found", drug_name)
         return []   # Empty list, not None: this is expected, not an error
-
-    if response.status_code == 429:
-        logger.warning("OpenFDA rate limit hit for '%s' — stopping", drug_name)
-        return None
 
     if not response.ok:
         logger.warning(
@@ -141,10 +173,11 @@ def _parse_results(results: list[dict], drug_name: str) -> list[dict]:
         if not reactions:
             continue
 
+        canonical_name = canonical(drug_name)
         for rxn in reactions:
             rows.append({
                 "safetyreportid": report_id,
-                "drug_name": drug_name.lower().strip(),
+                "drug_name": canonical_name,
                 "reaction": rxn.get("reactionmeddrapt", ""),
                 "outcome": str(rxn.get("reactionoutcome", "")),
                 "report_date": receive_date,
