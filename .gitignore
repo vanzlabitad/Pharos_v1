@@ -25,6 +25,8 @@ venv/
 
 # Quarto rendered outputs — regenerated on demand, not committed
 analysis/report.html
+analysis/report.pdf
+analysis/report.tex
 analysis/*_files/
 .quarto/
 
@@ -35,3 +37,6 @@ dashboard/.next/
 # Session handover docs — local working notes, not for the public repo
 HANDOFF.md
 HANDOFF-*.md
+
+# Claude Code working directory (per-project state, worktrees, settings)
+.claude/
