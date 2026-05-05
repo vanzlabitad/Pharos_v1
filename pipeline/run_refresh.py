@@ -35,6 +35,7 @@ from pipeline.db import (
     insert_signal_scores,
     clear_adverse_events,
     clear_signal_scores,
+    seed_drug_aliases,
 )
 from pipeline.ingest import fetch_adverse_events
 from pipeline.clean import clean_adverse_events
@@ -57,6 +58,7 @@ def main() -> int:
     """Run the full refresh pipeline. Returns exit code (0 = success)."""
     engine = get_engine()
     create_tables(engine)
+    seed_drug_aliases(engine)
 
     # ── Step 1: Re-ingest all drugs ──────────────────────────────────────────
     logger.info("Clearing adverse_events for fresh ingest")

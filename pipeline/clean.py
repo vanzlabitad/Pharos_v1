@@ -5,7 +5,8 @@ DataFrame aligned to the adverse_events DB schema, ready for insert.
 
 Transformations applied (in order):
   1. Drop rows with null/empty reaction
-  2. Lowercase + strip drug_name and reaction
+  2. Canonicalise drug_name via pipeline.normalise.canonical;
+     lowercase + strip reaction
   3. Map outcome codes → human-readable strings
   4. Parse report_date (YYYYMMDD → datetime.date; invalid → None)
   5. Cast serious to int; fill missing with 0
@@ -19,6 +20,8 @@ import logging
 from datetime import date
 
 import pandas as pd
+
+from pipeline.normalise import canonical
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +63,10 @@ def clean_adverse_events(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=_SCHEMA_COLUMNS)
 
-    # 2. Lowercase + strip text fields
-    df["drug_name"] = df["drug_name"].str.lower().str.strip()
+    # 2. Canonicalise drug_name (brand → generic via alias table; fallback to
+    #    lower+strip). Reaction terms come from MedDRA and don't need an alias
+    #    layer — lower+strip is enough.
+    df["drug_name"] = df["drug_name"].apply(canonical)
     df["reaction"] = df["reaction"].str.lower().str.strip()
 
     # 3. Map outcome codes to human-readable strings

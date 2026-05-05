@@ -15,6 +15,8 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from pipeline.normalise import canonical
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,7 +69,7 @@ def export_adverse_events_json(
         df = pd.read_sql(
             text("SELECT * FROM adverse_events WHERE drug_name = :drug"),
             conn,
-            params={"drug": drug_name.lower().strip()},
+            params={"drug": canonical(drug_name)},
         )
 
     if df.empty:

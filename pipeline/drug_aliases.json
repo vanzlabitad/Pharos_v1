@@ -1,0 +1,48 @@
+{
+  "advil": "ibuprofen",
+  "motrin": "ibuprofen",
+  "nurofen": "ibuprofen",
+  "brufen": "ibuprofen",
+
+  "tylenol": "acetaminophen",
+  "panadol": "acetaminophen",
+  "paracetamol": "acetaminophen",
+
+  "aleve": "naproxen",
+  "naprosyn": "naproxen",
+
+  "bayer": "aspirin",
+  "ecotrin": "aspirin",
+  "bufferin": "aspirin",
+
+  "glucophage": "metformin",
+  "fortamet": "metformin",
+  "glumetza": "metformin",
+
+  "lipitor": "atorvastatin",
+  "zocor": "simvastatin",
+  "crestor": "rosuvastatin",
+  "pravachol": "pravastatin",
+
+  "prilosec": "omeprazole",
+  "losec": "omeprazole",
+  "nexium": "esomeprazole",
+  "zantac": "ranitidine",
+
+  "prozac": "fluoxetine",
+  "zoloft": "sertraline",
+  "lexapro": "escitalopram",
+  "celexa": "citalopram",
+
+  "ativan": "lorazepam",
+  "xanax": "alprazolam",
+  "valium": "diazepam",
+  "ambien": "zolpidem",
+
+  "claritin": "loratadine",
+  "zyrtec": "cetirizine",
+  "benadryl": "diphenhydramine",
+
+  "coumadin": "warfarin",
+  "plavix": "clopidogrel"
+}
