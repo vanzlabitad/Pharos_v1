@@ -1,30 +1,31 @@
 import fs from "fs";
 import path from "path";
+import type { Signal } from "@/lib/types";
+import { SignalScoresClient } from "@/components/pages/signal-scores-client";
 
-type Signal = { drug_name: string };
-
-export function generateStaticParams() {
+function loadSignals(): Signal[] {
   const raw = fs.readFileSync(
     path.join(process.cwd(), "public/data/signals.json"),
     "utf-8"
   );
-  const signals: Signal[] = JSON.parse(raw);
+  return JSON.parse(raw);
+}
+
+export function generateStaticParams() {
+  const signals = loadSignals();
   const drugs = [...new Set(signals.map((s) => s.drug_name))];
   return drugs.map((name) => ({ name }));
 }
 
-export default async function SignalScores({
+export default async function SignalScoresPage({
   params,
 }: {
   params: Promise<{ name: string }>;
 }) {
   const { name } = await params;
-  return (
-    <main className="min-h-screen bg-bg-page p-8">
-      <h1 className="text-data-xl font-display font-semibold text-ink-100">
-        {decodeURIComponent(name)}
-      </h1>
-      <p className="mt-2 text-ink-400">Signal scores — redesign pending.</p>
-    </main>
-  );
+  const drugName = decodeURIComponent(name);
+  const allSignals = loadSignals();
+  const drugSignals = allSignals.filter((s) => s.drug_name === drugName);
+
+  return <SignalScoresClient drugName={drugName} drugSignals={drugSignals} />;
 }
