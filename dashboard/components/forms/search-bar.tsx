@@ -26,11 +26,11 @@ export function SearchBar({ size = "md" }: { size?: "md" | "xl" }) {
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search drug name (e.g. ibuprofen, aspirin)..."
+        placeholder="Find a drug · brand or generic"
         className={`w-full ${sizeClasses} bg-bg-surf border border-rule rounded-xs text-ink-100 placeholder:text-ink-500 font-sans focus:outline-none focus:border-accent transition-colors`}
       />
       <p className="mt-1.5 text-data-xs text-ink-500">
-        Brand names are resolved to generics where mapped.
+        Try metformin, ibuprofen, atorvastatin. Aliases resolved to canonical generic.
       </p>
     </form>
   );

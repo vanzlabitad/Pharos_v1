@@ -12,6 +12,12 @@ export type Signal = {
   flagged: boolean;
 };
 
+export type DrugMeta = {
+  drug_class: string;
+  atc_code: string;
+  aliases: string[];
+};
+
 export type AdverseEvent = {
   id: number;
   drug_name: string;

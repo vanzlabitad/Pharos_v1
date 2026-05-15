@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import Link from "next/link";
-import type { Signal } from "@/lib/types";
+import type { Signal, DrugMeta } from "@/lib/types";
 import { TopBar } from "@/components/chrome/top-bar";
 import { SearchBar } from "@/components/forms/search-bar";
 import { Stat } from "@/components/data/stat";
@@ -15,8 +15,15 @@ function loadSignals(): Signal[] {
   return JSON.parse(raw);
 }
 
+function loadDrugMeta(): Record<string, DrugMeta> {
+  const metaPath = path.join(process.cwd(), "public/data/drug-metadata.json");
+  if (!fs.existsSync(metaPath)) return {};
+  return JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+}
+
 type DrugSummary = {
   name: string;
+  drugClass: string;
   flaggedCount: number;
   totalSignals: number;
   topReaction: string;
@@ -26,7 +33,10 @@ type DrugSummary = {
   topFlagged: boolean;
 };
 
-function buildDrugSummaries(signals: Signal[]): DrugSummary[] {
+function buildDrugSummaries(
+  signals: Signal[],
+  meta: Record<string, DrugMeta>
+): DrugSummary[] {
   const byDrug = new Map<string, Signal[]>();
   for (const s of signals) {
     const list = byDrug.get(s.drug_name) ?? [];
@@ -40,6 +50,7 @@ function buildDrugSummaries(signals: Signal[]): DrugSummary[] {
     const top = rows.reduce((a, b) => (a.ror > b.ror ? a : b));
     summaries.push({
       name,
+      drugClass: meta[name]?.drug_class ?? "—",
       flaggedCount: flagged.length,
       totalSignals: rows.length,
       topReaction: top.reaction,
@@ -50,12 +61,13 @@ function buildDrugSummaries(signals: Signal[]): DrugSummary[] {
     });
   }
 
-  return summaries.sort((a, b) => b.flaggedCount - a.flaggedCount);
+  return summaries.sort((a, b) => b.topRor - a.topRor);
 }
 
 export default function Home() {
   const signals = loadSignals();
-  const drugs = buildDrugSummaries(signals);
+  const meta = loadDrugMeta();
+  const drugs = buildDrugSummaries(signals, meta);
   const nFlagged = signals.filter((s) => s.flagged).length;
   const nDrugs = drugs.length;
   const nReactions = new Set(signals.map((s) => s.reaction)).size;
@@ -67,6 +79,11 @@ export default function Home() {
       <TopBar active="Index" refreshDate={refreshDate} />
 
       <main className="px-6 py-8 max-w-7xl mx-auto">
+        {/* Breadcrumb */}
+        <p className="text-data-xs font-mono uppercase tracking-wide text-ink-500 mb-4">
+          Weekly snapshot &middot; {refreshDate} &middot; OpenFDA / FAERS
+        </p>
+
         {/* Masthead */}
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6 mb-8">
           <div>
@@ -74,19 +91,25 @@ export default function Home() {
               <span className="text-accent">{nFlagged}</span> signals across{" "}
               {nDrugs} drugs
             </h1>
-            <p className="mt-2 text-data-sm text-ink-400 max-w-xl">
-              Disproportionality signals detected via ROR (Rothman 2004) and
-              PRR/EVANS criterion (Evans 2001) on FDA FAERS spontaneous
-              reports.
+            <p className="mt-3 text-data-sm text-ink-400 max-w-xl">
+              Disproportionality scores recomputed every Monday from spontaneous
+              reports. Flag criterion: lower 95% CI of ROR &gt; 1 and EVANS
+              (PRR &ge; 2, a &ge; 3, &chi;&sup2; &ge; 4). Hypothesis-generating
+              only &mdash; not causal.
             </p>
           </div>
 
           {/* KPI strip */}
           <div className="flex gap-6 border-l border-rule pl-6">
-            <Stat label="Reactions" value={nReactions.toLocaleString()} size="md" />
-            <Stat label="Reports" value={nReports.toLocaleString()} size="md" />
-            <Stat label="Refresh" value="Weekly" size="md" />
-            <Stat label="Method" value="EVANS" glossary="EVANS" size="md" />
+            <Stat label="Reactions tracked" value={nReactions.toLocaleString()} size="md" />
+            <Stat label="Reports ingested" value={nReports.toLocaleString()} size="md" />
+            <Stat label="Refresh cadence" value="Weekly" size="md" />
+            <Stat
+              label="Methodology"
+              value="ROR + PRR"
+              glossary="EVANS"
+              size="md"
+            />
           </div>
         </div>
 
@@ -97,9 +120,14 @@ export default function Home() {
 
         {/* Watchlist grid */}
         <section>
-          <h2 className="text-data-xs font-mono uppercase tracking-wide text-ink-500 mb-3">
-            Drug index
-          </h2>
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-data-xs font-mono uppercase tracking-wide text-ink-500">
+              Watchlist &middot; highest signal drugs this refresh
+            </h2>
+            <span className="text-data-xs font-mono text-ink-500">
+              Sorted by top ROR
+            </span>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-rule">
             {drugs.map((drug) => (
               <Link
@@ -107,7 +135,7 @@ export default function Home() {
                 href={`/drug/${encodeURIComponent(drug.name)}`}
                 className="bg-bg-surf p-4 hover:bg-bg-raised transition-colors group"
               >
-                <div className="flex items-start justify-between mb-2">
+                <div className="flex items-start justify-between mb-1">
                   <span className="text-data-md font-display font-semibold text-ink-100 group-hover:text-accent transition-colors">
                     {drug.name}
                   </span>
@@ -117,12 +145,19 @@ export default function Home() {
                     </span>
                   )}
                 </div>
+                <div className="text-data-xs text-ink-500 mb-2">
+                  {drug.drugClass}
+                </div>
                 <div className="text-data-xs text-ink-400 mb-2 truncate">
-                  Top: {drug.topReaction}
+                  Top reaction &middot;{" "}
+                  <span className="text-ink-200">{drug.topReaction}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-data-md font-mono font-medium text-accent">
-                    {drug.topRor.toFixed(1)}
+                  <span className="text-data-lg font-mono font-medium text-accent">
+                    {drug.topRor.toFixed(2)}
+                  </span>
+                  <span className="text-data-xs font-mono text-ink-500 mr-2">
+                    ROR
                   </span>
                   <MiniSparkForest
                     lo={drug.topLo}
