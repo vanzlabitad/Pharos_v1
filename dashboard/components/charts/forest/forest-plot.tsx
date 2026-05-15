@@ -170,6 +170,7 @@ export function ForestPlot({
         ROR = 1
       </text>
 
+      {/* TODO: add glossary tooltips to forest plot column headers (ColLabel requires DOM, not SVG) */}
       {/* Column headers in right col */}
       <g>
         {(() => {
