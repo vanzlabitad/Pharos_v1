@@ -42,7 +42,13 @@ def export_signals_json(engine: Engine, output_path: str | Path) -> int:
         output_path.write_text("[]", encoding="utf-8")
         return 0
 
-    # computed_date comes back as a string from SQLite; keep it as-is
+    df["flagged"] = (
+        (df["ror_lower"] > 1.0)
+        & (df["prr"] >= 2.0)
+        & (df["n_reports"] >= 3)
+        & (df["chi_squared"] >= 4.0)
+    )
+
     df.to_json(output_path, orient="records", indent=2, date_format="iso")
     logger.info("Exported %d signal rows to %s", len(df), output_path)
     return len(df)
