@@ -1,0 +1,17 @@
+{
+  "aspirin": {
+    "drug_class": "NSAID · platelet inhibitor",
+    "atc_code": "N02BA01",
+    "aliases": ["Bayer", "Ecotrin", "Bufferin"]
+  },
+  "ibuprofen": {
+    "drug_class": "NSAID · COX 1/2 inhibitor",
+    "atc_code": "M01AE01",
+    "aliases": ["Advil", "Motrin", "Nurofen", "Brufen"]
+  },
+  "metformin": {
+    "drug_class": "Biguanide · oral hypoglycaemic",
+    "atc_code": "A10BA02",
+    "aliases": ["Glucophage", "Glumetza", "Fortamet"]
+  }
+}
