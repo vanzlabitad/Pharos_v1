@@ -33,6 +33,8 @@ analysis/*_files/
 # Node / dashboard (added later)
 dashboard/node_modules/
 dashboard/.next/
+dashboard/.vercel/
+dashboard/out/
 
 # Session handover docs — local working notes, not for the public repo
 HANDOFF.md
