@@ -6,3 +6,4 @@ scipy>=1.11
 statsmodels>=0.14
 pytest>=7.0
 matplotlib>=3.7
+google-genai>=1.0

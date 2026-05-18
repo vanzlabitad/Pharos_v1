@@ -1,7 +1,7 @@
 /**
  * Pharos design tokens — single source of truth.
  *
- * Colour: single amber accent on near-black base.
+ * Colour: single baby-blue accent on near-black base.
  * Type:   Inter Tight (display + body) + JetBrains Mono (data).
  * Radius: max 6px; inputs/chips 2px; chart elements 0.
  */
@@ -25,17 +25,17 @@ export const ink = {
 } as const;
 
 export const accent = {
-  DEFAULT: "#E0A458",
-  wash: "rgba(224, 164, 88, 0.10)",
-  line: "rgba(224, 164, 88, 0.55)",
-  muted: "rgba(224, 164, 88, 0.35)",
-  text: "#E0A458",
+  DEFAULT: "#5EBBF0",
+  wash: "rgba(94, 187, 240, 0.10)",
+  line: "rgba(94, 187, 240, 0.55)",
+  muted: "rgba(94, 187, 240, 0.35)",
+  text: "#5EBBF0",
 } as const;
 
 export const semantic = {
-  flagged: "#E0A458",
+  flagged: "#5EBBF0",
   unflagged: "#6b7280",
-  null_ref: "rgba(224, 164, 88, 0.55)",
+  null_ref: "rgba(94, 187, 240, 0.55)",
 } as const;
 
 export const border = {
@@ -108,7 +108,7 @@ export const forestPlot = {
   scaleMax: 100,
   nullLine: 1,
   nullLineColor: accent.line,
-  nullWash: "rgba(224, 164, 88, 0.10)",
+  nullWash: "rgba(94, 187, 240, 0.10)",
   flaggedDotR: 5.5,
   unflaggedDotR: 4,
   flaggedColor: accent.DEFAULT,

@@ -1,22 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 
 const NAV_ITEMS = [
-  { label: "Index", href: "/" },
-  { label: "Drugs", href: "/" },
-  { label: "Signals", href: "/" },
-  { label: "Methodology", href: "/" },
+  { label: "Home", href: "/" },
+  { label: "Explore", href: "/explore" },
+  { label: "Methodology", href: "/report.html" },
 ] as const;
 
-export function TopBar({
-  active,
-  refreshDate,
-}: {
-  active?: string;
-  refreshDate?: string;
-}) {
+export function TopBar({ refreshDate }: { refreshDate?: string }) {
+  const pathname = usePathname();
+
   return (
     <header className="flex items-center justify-between border-b border-rule px-6 py-3 bg-bg-surf">
       <div className="flex items-center gap-8">
@@ -25,7 +21,11 @@ export function TopBar({
         </Link>
         <nav className="flex gap-6">
           {NAV_ITEMS.map((item) => {
-            const isActive = active === item.label;
+            const isActive =
+              item.href === "/"
+                ? pathname === "/"
+                : pathname.startsWith(item.href) ||
+                  (item.href === "/explore" && pathname.startsWith("/drug"));
             return (
               <Link
                 key={item.label}

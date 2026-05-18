@@ -65,7 +65,7 @@ export function SignalScoresClient({
 
   return (
     <div className="min-h-screen bg-bg-page">
-      <TopBar active="Signals" refreshDate={refreshDate} />
+      <TopBar refreshDate={refreshDate} />
 
       <main className="px-6 py-8 max-w-[1200px] mx-auto">
         {/* Header */}
@@ -164,7 +164,7 @@ export function SignalScoresClient({
                 </svg>
                 <dd className="text-ink-300">
                   Flagged signal &mdash; both ROR and EVANS criteria pass.
-                  The amber halo marks statistical strength.
+                  The blue halo marks statistical strength.
                 </dd>
               </div>
               <div className="flex items-start gap-2">

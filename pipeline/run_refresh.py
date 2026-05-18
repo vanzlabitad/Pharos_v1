@@ -40,6 +40,7 @@ from pipeline.db import (
 from pipeline.ingest import fetch_adverse_events
 from pipeline.clean import clean_adverse_events
 from pipeline.export import export_signals_json, export_adverse_events_json
+from pipeline.summarize import generate_summaries, export_summaries_json
 from analysis.disproportionality import compute_all_signals
 
 logging.basicConfig(
@@ -116,6 +117,18 @@ def main() -> int:
             engine, drug, OUTPUT_DIR / f"{drug}.json"
         )
         logger.info("Exported %s.json (%d rows)", drug, n_ae)
+
+    # ── Step 4: Generate AI summaries (incremental) ─────────────────────
+    logger.info("Generating AI plain-language summaries...")
+    summaries_path = OUTPUT_DIR / "summaries.json"
+    summaries = generate_summaries(
+        OUTPUT_DIR / "signals.json", existing_path=summaries_path
+    )
+    if summaries:
+        n_sum = export_summaries_json(summaries, OUTPUT_DIR / "summaries.json")
+        logger.info("Exported summaries.json (%d drugs)", n_sum)
+    else:
+        logger.warning("No summaries generated (missing API key or no flagged signals)")
 
     logger.info("Refresh complete.")
     return 0
