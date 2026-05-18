@@ -25,6 +25,7 @@ jobs:
       - name: Run refresh pipeline
         env:
           OPENFDA_API_KEY: ${{ secrets.OPENFDA_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DB_PATH: db/pharos.db
         run: python pipeline/run_refresh.py
 
