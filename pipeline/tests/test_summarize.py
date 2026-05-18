@@ -9,8 +9,10 @@ import pytest
 from pipeline.summarize import (
     _build_prompt,
     _build_reaction_prompt,
+    _drug_is_complete,
     _get_top_flagged_signal,
     _get_top_flagged_signals,
+    _load_existing_summaries,
     export_summaries_json,
     generate_summaries,
 )
@@ -165,6 +167,11 @@ class TestExportSummariesJson:
         assert data == {}
 
 
+@pytest.fixture(autouse=True)
+def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pipeline.summarize.time.sleep", lambda _: None)
+
+
 class TestGenerateSummaries:
     def test_skips_without_api_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -217,3 +224,159 @@ class TestGenerateSummaries:
         assert "erosive oesophagitis" in reactions
         assert "gi bleeding" in reactions
         assert reactions["erosive oesophagitis"] == "A test summary."
+
+
+class TestLoadExistingSummaries:
+    def test_returns_empty_for_none(self) -> None:
+        assert _load_existing_summaries(None) == {}
+
+    def test_returns_empty_for_missing_file(self, tmp_path: Path) -> None:
+        assert _load_existing_summaries(tmp_path / "nope.json") == {}
+
+    def test_loads_valid_json(self, tmp_path: Path) -> None:
+        p = tmp_path / "summaries.json"
+        data = {"aspirin": {"overall": "existing", "reactions": {}}}
+        p.write_text(json.dumps(data))
+        assert _load_existing_summaries(p) == data
+
+    def test_returns_empty_for_corrupt_json(self, tmp_path: Path) -> None:
+        p = tmp_path / "summaries.json"
+        p.write_text("not json{{{")
+        assert _load_existing_summaries(p) == {}
+
+
+class TestDrugIsComplete:
+    def test_complete_drug(self) -> None:
+        existing = {
+            "aspirin": {
+                "overall": "summary text",
+                "reactions": {"gi bleeding": "text", "erosive oesophagitis": "text"},
+            }
+        }
+        assert _drug_is_complete(existing, "aspirin", {"gi bleeding", "erosive oesophagitis"})
+
+    def test_missing_overall(self) -> None:
+        existing = {"aspirin": {"overall": "", "reactions": {"gi bleeding": "text"}}}
+        assert not _drug_is_complete(existing, "aspirin", {"gi bleeding"})
+
+    def test_missing_reaction(self) -> None:
+        existing = {
+            "aspirin": {"overall": "text", "reactions": {"gi bleeding": "text"}}
+        }
+        assert not _drug_is_complete(existing, "aspirin", {"gi bleeding", "new reaction"})
+
+    def test_missing_drug(self) -> None:
+        assert not _drug_is_complete({}, "aspirin", {"gi bleeding"})
+
+    def test_non_dict_entry(self) -> None:
+        assert not _drug_is_complete({"aspirin": "old string format"}, "aspirin", {"gi bleeding"})
+
+
+class TestIncrementalGeneration:
+    @patch("pipeline.summarize._call_gemini")
+    def test_skips_complete_drug(
+        self, mock_gemini: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+        signals_path = tmp_path / "signals.json"
+        signals_path.write_text(json.dumps(SAMPLE_SIGNALS))
+
+        existing_path = tmp_path / "existing.json"
+        existing_path.write_text(json.dumps({
+            "aspirin": {
+                "overall": "Existing aspirin summary.",
+                "reactions": {
+                    "erosive oesophagitis": "Existing erosive text.",
+                    "gi bleeding": "Existing gi text.",
+                },
+            }
+        }))
+
+        result = generate_summaries(signals_path, existing_path=existing_path)
+
+        mock_gemini.assert_not_called()
+        assert result["aspirin"]["overall"] == "Existing aspirin summary."
+        assert result["aspirin"]["reactions"]["gi bleeding"] == "Existing gi text."
+
+    @patch("pipeline.summarize._call_gemini")
+    def test_fills_missing_reactions(
+        self, mock_gemini: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+        mock_gemini.return_value = "New reaction text."
+        signals_path = tmp_path / "signals.json"
+        signals_path.write_text(json.dumps(SAMPLE_SIGNALS))
+
+        existing_path = tmp_path / "existing.json"
+        existing_path.write_text(json.dumps({
+            "aspirin": {
+                "overall": "Existing overall.",
+                "reactions": {"erosive oesophagitis": "Already done."},
+            }
+        }))
+
+        result = generate_summaries(signals_path, existing_path=existing_path)
+
+        assert result["aspirin"]["overall"] == "Existing overall."
+        assert result["aspirin"]["reactions"]["erosive oesophagitis"] == "Already done."
+        assert result["aspirin"]["reactions"]["gi bleeding"] == "New reaction text."
+        assert mock_gemini.call_count == 1
+
+    @patch("pipeline.summarize._call_gemini")
+    def test_generates_new_drug_fully(
+        self, mock_gemini: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+        mock_gemini.return_value = "Generated text."
+        signals_path = tmp_path / "signals.json"
+        signals_path.write_text(json.dumps(SAMPLE_SIGNALS))
+
+        result = generate_summaries(signals_path, existing_path=None)
+
+        assert "aspirin" in result
+        assert result["aspirin"]["overall"] == "Generated text."
+        assert len(result["aspirin"]["reactions"]) == 2
+        # 1 overall + 2 reactions = 3 calls
+        assert mock_gemini.call_count == 3
+
+    @patch("pipeline.summarize._call_gemini")
+    def test_preserves_existing_drugs_not_in_signals(
+        self, mock_gemini: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+        mock_gemini.return_value = "New."
+        signals_path = tmp_path / "signals.json"
+        signals_path.write_text(json.dumps(SAMPLE_SIGNALS))
+
+        existing_path = tmp_path / "existing.json"
+        existing_path.write_text(json.dumps({
+            "old_drug": {"overall": "Old drug summary.", "reactions": {}},
+        }))
+
+        result = generate_summaries(signals_path, existing_path=existing_path)
+
+        assert result["old_drug"]["overall"] == "Old drug summary."
+        assert "aspirin" in result
+
+    @patch("pipeline.summarize._call_gemini")
+    def test_reaction_failure_preserves_existing_reactions(
+        self, mock_gemini: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+        mock_gemini.return_value = None
+        signals_path = tmp_path / "signals.json"
+        signals_path.write_text(json.dumps(SAMPLE_SIGNALS))
+
+        existing_path = tmp_path / "existing.json"
+        existing_path.write_text(json.dumps({
+            "aspirin": {
+                "overall": "Existing overall.",
+                "reactions": {"erosive oesophagitis": "Already done."},
+            }
+        }))
+
+        result = generate_summaries(signals_path, existing_path=existing_path)
+
+        assert result["aspirin"]["overall"] == "Existing overall."
+        assert result["aspirin"]["reactions"]["erosive oesophagitis"] == "Already done."
+        assert "gi bleeding" not in result["aspirin"]["reactions"]
