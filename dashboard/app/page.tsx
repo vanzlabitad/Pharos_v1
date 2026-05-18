@@ -1,11 +1,8 @@
 import fs from "fs";
 import path from "path";
 import Link from "next/link";
-import type { Signal, DrugMeta } from "@/lib/types";
+import type { Signal } from "@/lib/types";
 import { TopBar } from "@/components/chrome/top-bar";
-import { SearchBar } from "@/components/forms/search-bar";
-import { Stat } from "@/components/data/stat";
-import { MiniSparkForest } from "@/components/charts/mini-spark-forest";
 
 function loadSignals(): Signal[] {
   const raw = fs.readFileSync(
@@ -15,160 +12,123 @@ function loadSignals(): Signal[] {
   return JSON.parse(raw);
 }
 
-function loadDrugMeta(): Record<string, DrugMeta> {
-  const metaPath = path.join(process.cwd(), "public/data/drug-metadata.json");
-  if (!fs.existsSync(metaPath)) return {};
-  return JSON.parse(fs.readFileSync(metaPath, "utf-8"));
-}
+const STEPS = [
+  {
+    number: "01",
+    title: "Collect",
+    description:
+      "Every week, adverse event reports are pulled from the FDA's public database (FAERS) — the same source regulators use to monitor drug safety.",
+  },
+  {
+    number: "02",
+    title: "Detect",
+    description:
+      "Statistical methods compare how often a side effect is reported for a given drug versus all other drugs. Unusual spikes get flagged for attention.",
+  },
+  {
+    number: "03",
+    title: "Explore",
+    description:
+      "Browse the results by drug. See which side effects stand out, how strong the signal is, and what the numbers mean — explained in plain language.",
+  },
+] as const;
 
-type DrugSummary = {
-  name: string;
-  drugClass: string;
-  flaggedCount: number;
-  totalSignals: number;
-  topReaction: string;
-  topRor: number;
-  topLo: number;
-  topHi: number;
-  topFlagged: boolean;
-};
-
-function buildDrugSummaries(
-  signals: Signal[],
-  meta: Record<string, DrugMeta>
-): DrugSummary[] {
-  const byDrug = new Map<string, Signal[]>();
-  for (const s of signals) {
-    const list = byDrug.get(s.drug_name) ?? [];
-    list.push(s);
-    byDrug.set(s.drug_name, list);
-  }
-
-  const summaries: DrugSummary[] = [];
-  for (const [name, rows] of byDrug) {
-    const flagged = rows.filter((r) => r.flagged);
-    const top = rows.reduce((a, b) => (a.ror > b.ror ? a : b));
-    summaries.push({
-      name,
-      drugClass: meta[name]?.drug_class ?? "—",
-      flaggedCount: flagged.length,
-      totalSignals: rows.length,
-      topReaction: top.reaction,
-      topRor: top.ror,
-      topLo: top.ror_lower,
-      topHi: top.ror_upper,
-      topFlagged: top.flagged,
-    });
-  }
-
-  return summaries.sort((a, b) => b.topRor - a.topRor);
-}
-
-export default function Home() {
+export default function Landing() {
   const signals = loadSignals();
-  const meta = loadDrugMeta();
-  const drugs = buildDrugSummaries(signals, meta);
-  const nFlagged = signals.filter((s) => s.flagged).length;
-  const nDrugs = drugs.length;
-  const nReactions = new Set(signals.map((s) => s.reaction)).size;
+  const nDrugs = new Set(signals.map((s) => s.drug_name)).size;
   const nReports = signals.reduce((sum, s) => sum + s.n_reports, 0);
+  const nFlagged = signals.filter((s) => s.flagged).length;
   const refreshDate = signals[0]?.computed_date ?? "—";
 
   return (
     <div className="min-h-screen bg-bg-page">
-      <TopBar active="Index" refreshDate={refreshDate} />
+      <TopBar refreshDate={refreshDate} />
 
-      <main className="px-6 py-8 max-w-7xl mx-auto">
-        {/* Breadcrumb */}
-        <p className="text-data-xs font-mono uppercase tracking-wide text-ink-500 mb-4">
-          Weekly snapshot &middot; {refreshDate} &middot; OpenFDA / FAERS
-        </p>
+      <main className="px-6 py-16 max-w-4xl mx-auto">
+        {/* Hero */}
+        <section className="mb-20 text-center">
+          <h1 className="text-4xl sm:text-5xl font-display font-bold tracking-tight text-ink-100 mb-6">
+            Drug safety signals,{" "}
+            <span className="text-accent">made visible</span>
+          </h1>
+          <p className="text-lg text-ink-300 max-w-2xl mx-auto mb-10 leading-relaxed">
+            Pharos watches for unusual patterns in drug side-effect reports.
+            When a medication is linked to a reaction more often than expected,
+            the system flags it — giving researchers and the public a clearer
+            picture of what the data shows.
+          </p>
+          <Link
+            href="/explore"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-sm bg-accent text-bg-page font-semibold text-base hover:opacity-90 transition-opacity"
+          >
+            Explore drugs
+            <span aria-hidden="true">&rarr;</span>
+          </Link>
+        </section>
 
-        {/* Masthead */}
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6 mb-8">
-          <div>
-            <h1 className="text-data-2xl font-display font-semibold text-ink-100">
-              <span className="text-accent">{nFlagged}</span> signals across{" "}
-              {nDrugs} drugs
-            </h1>
-            <p className="mt-3 text-data-sm text-ink-400 max-w-xl">
-              Disproportionality scores recomputed every Monday from spontaneous
-              reports. Flag criterion: lower 95% CI of ROR &gt; 1 and EVANS
-              (PRR &ge; 2, a &ge; 3, &chi;&sup2; &ge; 4). Hypothesis-generating
-              only &mdash; not causal.
-            </p>
+        {/* Stats */}
+        <section className="mb-20">
+          <div className="grid grid-cols-3 gap-px bg-rule rounded-sm overflow-hidden">
+            <div className="bg-bg-surf p-6 text-center">
+              <div className="text-3xl font-mono font-semibold text-accent mb-1">
+                {nDrugs}
+              </div>
+              <div className="text-data-xs text-ink-400 uppercase tracking-wide">
+                Drugs tracked
+              </div>
+            </div>
+            <div className="bg-bg-surf p-6 text-center">
+              <div className="text-3xl font-mono font-semibold text-accent mb-1">
+                {nReports.toLocaleString()}
+              </div>
+              <div className="text-data-xs text-ink-400 uppercase tracking-wide">
+                Reports analysed
+              </div>
+            </div>
+            <div className="bg-bg-surf p-6 text-center">
+              <div className="text-3xl font-mono font-semibold text-accent mb-1">
+                {nFlagged}
+              </div>
+              <div className="text-data-xs text-ink-400 uppercase tracking-wide">
+                Signals flagged
+              </div>
+            </div>
           </div>
+        </section>
 
-          {/* KPI strip */}
-          <div className="flex gap-6 border-l border-rule pl-6">
-            <Stat label="Reactions tracked" value={nReactions.toLocaleString()} size="md" />
-            <Stat label="Reports ingested" value={nReports.toLocaleString()} size="md" />
-            <Stat label="Refresh cadence" value="Weekly" size="md" />
-            <Stat
-              label="Methodology"
-              value="ROR + PRR"
-              glossary="EVANS"
-              size="md"
-            />
-          </div>
-        </div>
-
-        {/* Search */}
-        <div className="mb-10">
-          <SearchBar size="xl" />
-        </div>
-
-        {/* Watchlist grid */}
-        <section>
-          <div className="flex items-baseline justify-between mb-3">
-            <h2 className="text-data-xs font-mono uppercase tracking-wide text-ink-500">
-              Watchlist &middot; highest signal drugs this refresh
-            </h2>
-            <span className="text-data-xs font-mono text-ink-500">
-              Sorted by top ROR
-            </span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-rule">
-            {drugs.map((drug) => (
-              <Link
-                key={drug.name}
-                href={`/drug/${encodeURIComponent(drug.name)}`}
-                className="bg-bg-surf p-4 hover:bg-bg-raised transition-colors group"
-              >
-                <div className="flex items-start justify-between mb-1">
-                  <span className="text-data-md font-display font-semibold text-ink-100 group-hover:text-accent transition-colors">
-                    {drug.name}
-                  </span>
-                  {drug.flaggedCount > 0 && (
-                    <span className="text-data-xs font-mono px-1.5 py-0.5 rounded-xs bg-accent-wash text-accent">
-                      {drug.flaggedCount} flagged
-                    </span>
-                  )}
+        {/* How it works */}
+        <section className="mb-20">
+          <h2 className="text-data-xs font-mono uppercase tracking-wide text-ink-500 mb-8 text-center">
+            How it works
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {STEPS.map((step) => (
+              <div key={step.number} className="flex flex-col">
+                <div className="text-data-xs font-mono text-accent mb-2">
+                  {step.number}
                 </div>
-                <div className="text-data-xs text-ink-500 mb-2">
-                  {drug.drugClass}
-                </div>
-                <div className="text-data-xs text-ink-400 mb-2 truncate">
-                  Top reaction &middot;{" "}
-                  <span className="text-ink-200">{drug.topReaction}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-data-lg font-mono font-medium text-accent">
-                    {drug.topRor.toFixed(2)}
-                  </span>
-                  <span className="text-data-xs font-mono text-ink-500 mr-2">
-                    ROR
-                  </span>
-                  <MiniSparkForest
-                    lo={drug.topLo}
-                    point={drug.topRor}
-                    hi={drug.topHi}
-                    flagged={drug.topFlagged}
-                  />
-                </div>
-              </Link>
+                <h3 className="text-lg font-display font-semibold text-ink-100 mb-2">
+                  {step.title}
+                </h3>
+                <p className="text-data-sm text-ink-400 leading-relaxed">
+                  {step.description}
+                </p>
+              </div>
             ))}
           </div>
+        </section>
+
+        {/* Footer CTA */}
+        <section className="text-center border-t border-rule pt-12">
+          <p className="text-ink-400 mb-4">
+            Updated weekly from FDA FAERS data. Last refresh: {refreshDate}.
+          </p>
+          <Link
+            href="/explore"
+            className="text-accent font-medium hover:underline"
+          >
+            Start exploring &rarr;
+          </Link>
         </section>
       </main>
     </div>

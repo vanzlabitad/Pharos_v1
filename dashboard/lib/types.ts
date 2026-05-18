@@ -27,3 +27,8 @@ export type AdverseEvent = {
   serious: number;
   source: string;
 };
+
+export type DrugSummary = {
+  overall: string;
+  reactions: Record<string, string>;
+};
