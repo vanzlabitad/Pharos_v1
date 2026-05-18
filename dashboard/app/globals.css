@@ -20,10 +20,10 @@
   --ink-500: #4b5563;
   --ink-600: #374151;
 
-  --accent: #E0A458;
-  --accent-wash: rgba(224, 164, 88, 0.10);
-  --accent-line: rgba(224, 164, 88, 0.55);
-  --accent-muted: rgba(224, 164, 88, 0.35);
+  --accent: #5EBBF0;
+  --accent-wash: rgba(94, 187, 240, 0.10);
+  --accent-line: rgba(94, 187, 240, 0.55);
+  --accent-muted: rgba(94, 187, 240, 0.35);
 
   --border-hair: rgba(244, 245, 247, 0.06);
   --border-rule: rgba(244, 245, 247, 0.10);
