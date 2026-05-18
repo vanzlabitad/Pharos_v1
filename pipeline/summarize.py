@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 _MODEL = "gemini-2.5-flash"
 _MAX_DRUGS_PER_REFRESH = 200
-_RETRY_DELAY = 2
-_RATE_LIMIT_DELAY = 15
+_INITIAL_RETRY_DELAY = 15
+_MAX_RETRIES = 4
 _INTER_CALL_DELAY = 13
 
 _PROMPT_TEMPLATE = """\
@@ -130,36 +130,60 @@ def _call_gemini(prompt: str, api_key: str) -> str | None:
         return None
 
     client = genai.Client(api_key=api_key)
+    delay = _INITIAL_RETRY_DELAY
 
-    for attempt in range(2):
+    for attempt in range(_MAX_RETRIES):
         try:
             response = client.models.generate_content(
                 model=_MODEL, contents=prompt
             )
             return response.text.strip()
         except Exception as exc:
-            exc_name = type(exc).__name__
-            is_rate_limit = "429" in str(exc) or "ResourceExhausted" in exc_name
-            delay = _RATE_LIMIT_DELAY if is_rate_limit else _RETRY_DELAY
-
-            if attempt == 0:
-                logger.warning(
-                    "Gemini API error (%s), retrying in %ds...", exc_name, delay
+            if attempt == _MAX_RETRIES - 1:
+                logger.error(
+                    "Gemini API failed after %d attempts: %s", _MAX_RETRIES, exc
                 )
-                time.sleep(delay)
-            else:
-                logger.error("Gemini API failed after retry: %s", exc)
                 return None
+            logger.warning(
+                "Gemini API error (%s), retrying in %ds (attempt %d/%d)...",
+                type(exc).__name__, delay, attempt + 1, _MAX_RETRIES,
+            )
+            time.sleep(delay)
+            delay *= 2
 
-    return None
+
+def _load_existing_summaries(path: Path | None) -> dict:
+    if path is None or not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        logger.warning("Could not load existing summaries from %s", path)
+        return {}
+
+
+def _drug_is_complete(
+    existing: dict, drug: str, needed_reactions: set[str]
+) -> bool:
+    entry = existing.get(drug)
+    if not entry or not isinstance(entry, dict):
+        return False
+    if not entry.get("overall"):
+        return False
+    existing_reactions = set(entry.get("reactions", {}).keys())
+    return needed_reactions.issubset(existing_reactions)
 
 
 def generate_summaries(
     signals_path: Path,
+    existing_path: Path | None = None,
 ) -> dict[str, dict[str, str | dict[str, str]]]:
     """Generate plain-language summaries for drugs with flagged signals.
 
-    Returns nested dict: {drug: {"overall": "...", "reactions": {"name": "..."}}}
+    Incremental: loads existing summaries from existing_path and only
+    calls the API for drugs/reactions that are missing or incomplete.
+
+    Returns merged dict: {drug: {"overall": "...", "reactions": {"name": "..."}}}
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -181,40 +205,65 @@ def generate_summaries(
         return {}
 
     drugs_with_flags = drugs_with_flags[:_MAX_DRUGS_PER_REFRESH]
-    logger.info("Generating summaries for %d drugs...", len(drugs_with_flags))
 
+    existing = _load_existing_summaries(existing_path)
     summaries: dict[str, dict[str, str | dict[str, str]]] = {}
+    for drug, entry in existing.items():
+        if isinstance(entry, dict):
+            summaries[drug] = entry
+
+    api_calls = 0
+    skipped = 0
 
     for i, drug in enumerate(drugs_with_flags, 1):
-        top = _get_top_flagged_signal(signals, drug)
-        if not top:
-            continue
-
-        prompt = _build_prompt(
-            drug_name=drug,
-            top_reaction=top["reaction"],
-            ror=top["ror"],
-            ror_lower=top["ror_lower"],
-            ror_upper=top["ror_upper"],
-            n_reports=top["n_reports"],
-            flagged=top["flagged"],
-        )
-
-        overall_text = _call_gemini(prompt, api_key)
-        if not overall_text:
-            logger.warning("Skipped summary for %s (API error)", drug)
-            continue
-
-        logger.info(
-            "Generated overall summary for %s (%d/%d)",
-            drug, i, len(drugs_with_flags),
-        )
-        time.sleep(_INTER_CALL_DELAY)
-
-        reaction_summaries: dict[str, str] = {}
         top_signals = _get_top_flagged_signals(signals, drug, limit=15)
+        needed_reactions = {s["reaction"] for s in top_signals}
 
+        if _drug_is_complete(summaries, drug, needed_reactions):
+            logger.info("Skipped %s — already complete (%d/%d)", drug, i, len(drugs_with_flags))
+            skipped += 1
+            continue
+
+        drug_entry = summaries.get(drug, {})
+        if not isinstance(drug_entry, dict):
+            drug_entry = {}
+        existing_overall = drug_entry.get("overall")
+        existing_reactions: dict[str, str] = dict(drug_entry.get("reactions", {}))
+
+        if not existing_overall:
+            top = _get_top_flagged_signal(signals, drug)
+            if not top:
+                continue
+
+            prompt = _build_prompt(
+                drug_name=drug,
+                top_reaction=top["reaction"],
+                ror=top["ror"],
+                ror_lower=top["ror_lower"],
+                ror_upper=top["ror_upper"],
+                n_reports=top["n_reports"],
+                flagged=top["flagged"],
+            )
+
+            overall_text = _call_gemini(prompt, api_key)
+            api_calls += 1
+            if not overall_text:
+                logger.warning("Skipped summary for %s (API error)", drug)
+                continue
+
+            logger.info(
+                "Generated overall summary for %s (%d/%d)",
+                drug, i, len(drugs_with_flags),
+            )
+            time.sleep(_INTER_CALL_DELAY)
+        else:
+            overall_text = existing_overall
+
+        new_reactions = 0
         for sig in top_signals:
+            if sig["reaction"] in existing_reactions:
+                continue
+
             rprompt = _build_reaction_prompt(
                 drug_name=drug,
                 reaction=sig["reaction"],
@@ -224,19 +273,25 @@ def generate_summaries(
                 n_reports=sig["n_reports"],
             )
             rtext = _call_gemini(rprompt, api_key)
+            api_calls += 1
             if rtext:
-                reaction_summaries[sig["reaction"]] = rtext
+                existing_reactions[sig["reaction"]] = rtext
+                new_reactions += 1
             time.sleep(_INTER_CALL_DELAY)
 
         summaries[drug] = {
             "overall": overall_text,
-            "reactions": reaction_summaries,
+            "reactions": existing_reactions,
         }
         logger.info(
-            "Generated %d reaction summaries for %s",
-            len(reaction_summaries), drug,
+            "%s: %d new reactions generated, %d total stored (%d API calls so far)",
+            drug, new_reactions, len(existing_reactions), api_calls,
         )
 
+    logger.info(
+        "Summary generation complete: %d drugs in output, %d skipped (already complete), %d API calls",
+        len(summaries), skipped, api_calls,
+    )
     return summaries
 
 
