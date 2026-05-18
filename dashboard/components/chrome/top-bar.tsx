@@ -5,9 +5,9 @@ import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 
 const NAV_ITEMS = [
-  { label: "Home", href: "/" },
-  { label: "Explore", href: "/explore" },
-  { label: "Methodology", href: "/report.html" },
+  { label: "Home", href: "/", external: false },
+  { label: "Explore", href: "/explore", external: false },
+  { label: "Methodology", href: "/report", external: true },
 ] as const;
 
 export function TopBar({ refreshDate }: { refreshDate?: string }) {
@@ -26,16 +26,17 @@ export function TopBar({ refreshDate }: { refreshDate?: string }) {
                 ? pathname === "/"
                 : pathname.startsWith(item.href) ||
                   (item.href === "/explore" && pathname.startsWith("/drug"));
-            return (
-              <Link
-                key={item.label}
-                href={item.href}
-                className={`text-data-sm font-medium transition-colors ${
-                  isActive
-                    ? "text-ink-100 border-b-2 border-accent pb-0.5"
-                    : "text-ink-400 hover:text-ink-200"
-                }`}
-              >
+            const cls = `text-data-sm font-medium transition-colors ${
+              isActive
+                ? "text-ink-100 border-b-2 border-accent pb-0.5"
+                : "text-ink-400 hover:text-ink-200"
+            }`;
+            return item.external ? (
+              <a key={item.label} href={item.href} className={cls}>
+                {item.label}
+              </a>
+            ) : (
+              <Link key={item.label} href={item.href} className={cls}>
                 {item.label}
               </Link>
             );
