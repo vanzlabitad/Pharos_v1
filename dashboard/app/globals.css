@@ -42,3 +42,8 @@ html, body {
 
 /* All data renders with tabular numerals */
 .font-mono, [data-tabular], .data { font-variant-numeric: tabular-nums; }
+
+@keyframes pharos-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}

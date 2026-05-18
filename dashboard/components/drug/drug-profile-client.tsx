@@ -46,7 +46,10 @@ export function DrugProfileClient({
             <>Plain language</>
           )}
         </span>
-        <blockquote className="border-l-2 border-accent pl-4 text-data-md text-ink-200 font-display leading-relaxed">
+        <blockquote
+          key={selectedReaction ?? "__overall__"}
+          className="border-l-2 border-accent pl-4 text-data-md text-ink-200 font-display leading-relaxed [animation:pharos-fade-in_0.2s_ease]"
+        >
           {activeText ?? (
             <span className="text-ink-500 italic">
               AI summary not yet generated for this drug. Summaries are
@@ -129,7 +132,7 @@ export function DrugProfileClient({
                         {hasExplanation ? (
                           <button
                             onClick={() => handleReactionClick(s.reaction)}
-                            className={`text-left transition-colors ${
+                            className={`text-left cursor-pointer underline decoration-dotted underline-offset-2 transition-colors ${
                               isActive
                                 ? "text-accent font-medium"
                                 : "text-ink-200 hover:text-accent"
