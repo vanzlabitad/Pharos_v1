@@ -398,6 +398,22 @@ class TestFetchPage:
 # ── fetch_adverse_events ────────────────────────────────────────────────────
 
 
+def _make_page(start_id: int, count: int, drug: str = "drug") -> list[dict]:
+    """Helper to create a page of test results."""
+    return [
+        {
+            "safetyreportid": f"{start_id + i}",
+            "drug_name": drug,
+            "reaction": f"r{i}",
+            "outcome": "1",
+            "report_date": "20220101",
+            "serious": 1,
+            "source": "openfda_faers",
+        }
+        for i in range(count)
+    ]
+
+
 class TestFetchAdverseEvents:
     """Test pagination and aggregation of multi-page results."""
 
@@ -427,13 +443,9 @@ class TestFetchAdverseEvents:
     @patch("pipeline.ingest.time.sleep")
     def test_pagination_continues_until_max_records(self, mock_sleep, mock_fetch_page):
         """Test pagination stops when max_records is reached."""
-        page1 = [{"safetyreportid": f"{i}", "drug_name": "drug", "reaction": f"r{i}",
-                  "outcome": "1", "report_date": "20220101", "serious": 1, "source": "openfda_faers"}
-                 for i in range(1000)]
+        page1 = _make_page(0, 1000)
         # Return partial page to trigger stop condition
-        page2 = [{"safetyreportid": f"{i+1000}", "drug_name": "drug", "reaction": f"r{i}",
-                  "outcome": "1", "report_date": "20220101", "serious": 1, "source": "openfda_faers"}
-                 for i in range(100)]  # Less than the 200 requested, will stop pagination
+        page2 = _make_page(1000, 100)
         mock_fetch_page.side_effect = [page1, page2]
 
         df = fetch_adverse_events("ibuprofen", max_records=2000)
@@ -446,12 +458,8 @@ class TestFetchAdverseEvents:
     @patch("pipeline.ingest.time.sleep")
     def test_pagination_stops_on_partial_page(self, mock_sleep, mock_fetch_page):
         """Test pagination stops when API returns fewer records than requested."""
-        page1 = [{"safetyreportid": f"{i}", "drug_name": "drug", "reaction": f"r{i}",
-                  "outcome": "1", "report_date": "20220101", "serious": 1, "source": "openfda_faers"}
-                 for i in range(1000)]
-        page2 = [{"safetyreportid": f"{i+1000}", "drug_name": "drug", "reaction": f"r{i}",
-                  "outcome": "1", "report_date": "20220101", "serious": 1, "source": "openfda_faers"}
-                 for i in range(500)]  # Less than requested page size
+        page1 = _make_page(0, 1000)
+        page2 = _make_page(1000, 500)
         mock_fetch_page.side_effect = [page1, page2]
 
         df = fetch_adverse_events("ibuprofen", max_records=5000)
@@ -464,9 +472,7 @@ class TestFetchAdverseEvents:
     @patch("pipeline.ingest.time.sleep")
     def test_fetch_page_failure_stops_pagination(self, mock_sleep, mock_fetch_page):
         """Test that pagination stops if _fetch_page returns None."""
-        page1 = [{"safetyreportid": f"{i}", "drug_name": "drug", "reaction": f"r{i}",
-                  "outcome": "1", "report_date": "20220101", "serious": 1, "source": "openfda_faers"}
-                 for i in range(1000)]  # Full page to trigger a second call
+        page1 = _make_page(0, 1000)
         mock_fetch_page.side_effect = [page1, None]  # Second call fails
 
         df = fetch_adverse_events("ibuprofen", max_records=5000)

@@ -67,10 +67,9 @@ class TestParseDate:
         assert _parse_date(20220315) == date(2022, 3, 15)
 
     def test_too_short_string_returns_none(self):
-        """Test that string shorter than 8 chars may parse with truncated date."""
-        # Note: "2022031" parses as 2022-03-01 because int("1") == 1 day
-        result = _parse_date("202203")  # Only 6 chars - definitely too short
-        assert result is None
+        """Test that very short strings (< 8 chars) return None."""
+        # 6-digit string is too short for YYYYMMDD format
+        assert _parse_date("202203") is None
 
     def test_non_numeric_string_returns_none(self):
         """Test that non-numeric string returns None."""
