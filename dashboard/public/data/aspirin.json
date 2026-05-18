@@ -17301,7 +17301,7 @@
     "id":15325,
     "drug_name":"aspirin",
     "reaction":"bronchitis",
-    "outcome":"unknown",
+    "outcome":"recovering",
     "report_date":"2014-03-18",
     "serious":1,
     "source":"openfda_faers"
@@ -17345,7 +17345,7 @@
   {
     "id":15330,
     "drug_name":"aspirin",
-    "reaction":"hypoglycaemia",
+    "reaction":"sputum discoloured",
     "outcome":"unknown",
     "report_date":"2014-03-18",
     "serious":1,
@@ -17354,7 +17354,7 @@
   {
     "id":15331,
     "drug_name":"aspirin",
-    "reaction":"weight decreased",
+    "reaction":"nasopharyngitis",
     "outcome":"unknown",
     "report_date":"2014-03-18",
     "serious":1,
@@ -17363,51 +17363,6 @@
   {
     "id":15332,
     "drug_name":"aspirin",
-    "reaction":"dizziness",
-    "outcome":"not_recovered",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15333,
-    "drug_name":"aspirin",
-    "reaction":"rash",
-    "outcome":"not_recovered",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15334,
-    "drug_name":"aspirin",
-    "reaction":"dyspepsia",
-    "outcome":"unknown",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15335,
-    "drug_name":"aspirin",
-    "reaction":"abdominal pain",
-    "outcome":"recovered",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15336,
-    "drug_name":"aspirin",
-    "reaction":"sputum discoloured",
-    "outcome":"unknown",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15337,
-    "drug_name":"aspirin",
     "reaction":"covid-19",
     "outcome":"unknown",
     "report_date":"2014-03-18",
@@ -17415,52 +17370,7 @@
     "source":"openfda_faers"
   },
   {
-    "id":15338,
-    "drug_name":"aspirin",
-    "reaction":"pruritus",
-    "outcome":"unknown",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15339,
-    "drug_name":"aspirin",
-    "reaction":"nausea",
-    "outcome":"unknown",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15340,
-    "drug_name":"aspirin",
-    "reaction":"nasopharyngitis",
-    "outcome":"unknown",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15341,
-    "drug_name":"aspirin",
-    "reaction":"fatigue",
-    "outcome":"unknown",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15342,
-    "drug_name":"aspirin",
-    "reaction":"product use issue",
-    "outcome":"unknown",
-    "report_date":"2014-03-18",
-    "serious":1,
-    "source":"openfda_faers"
-  },
-  {
-    "id":15343,
+    "id":15333,
     "drug_name":"aspirin",
     "reaction":"needle issue",
     "outcome":"unknown",
@@ -17469,7 +17379,88 @@
     "source":"openfda_faers"
   },
   {
-    "id":15344,
+    "id":15334,
+    "drug_name":"aspirin",
+    "reaction":"weight decreased",
+    "outcome":"unknown",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15335,
+    "drug_name":"aspirin",
+    "reaction":"hypoglycaemia",
+    "outcome":"unknown",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15336,
+    "drug_name":"aspirin",
+    "reaction":"dizziness",
+    "outcome":"not_recovered",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15337,
+    "drug_name":"aspirin",
+    "reaction":"rash",
+    "outcome":"not_recovered",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15338,
+    "drug_name":"aspirin",
+    "reaction":"dyspepsia",
+    "outcome":"unknown",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15339,
+    "drug_name":"aspirin",
+    "reaction":"abdominal pain",
+    "outcome":"recovered",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15340,
+    "drug_name":"aspirin",
+    "reaction":"pruritus",
+    "outcome":"unknown",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15341,
+    "drug_name":"aspirin",
+    "reaction":"nausea",
+    "outcome":"unknown",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15342,
+    "drug_name":"aspirin",
+    "reaction":"fatigue",
+    "outcome":"unknown",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15343,
     "drug_name":"aspirin",
     "reaction":"injection site hypersensitivity",
     "outcome":"unknown",
@@ -17478,7 +17469,7 @@
     "source":"openfda_faers"
   },
   {
-    "id":15345,
+    "id":15344,
     "drug_name":"aspirin",
     "reaction":"injection site haematoma",
     "outcome":"unknown",
@@ -17487,7 +17478,7 @@
     "source":"openfda_faers"
   },
   {
-    "id":15346,
+    "id":15345,
     "drug_name":"aspirin",
     "reaction":"injection site pain",
     "outcome":"recovered",
@@ -17496,7 +17487,7 @@
     "source":"openfda_faers"
   },
   {
-    "id":15347,
+    "id":15346,
     "drug_name":"aspirin",
     "reaction":"injection site mass",
     "outcome":"unknown",
@@ -17505,9 +17496,18 @@
     "source":"openfda_faers"
   },
   {
-    "id":15348,
+    "id":15347,
     "drug_name":"aspirin",
     "reaction":"headache",
+    "outcome":"unknown",
+    "report_date":"2014-03-18",
+    "serious":1,
+    "source":"openfda_faers"
+  },
+  {
+    "id":15348,
+    "drug_name":"aspirin",
+    "reaction":"product use issue",
     "outcome":"unknown",
     "report_date":"2014-03-18",
     "serious":1,
