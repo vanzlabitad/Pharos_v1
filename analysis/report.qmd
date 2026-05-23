@@ -144,6 +144,16 @@ summary = pd.DataFrame({
 summary.style.hide(axis="index").set_properties(**{"text-align": "left"})
 ```
 
+### Drug-name canonicalisation
+
+Reports are aggregated under a canonical generic name resolved by
+`pipeline.normalise.canonical`, which consults a curated alias table at
+[`pipeline/drug_aliases.json`](../pipeline/drug_aliases.json) and falls
+through to `lower().strip()` for unmapped names. Coverage is deliberately
+narrow — roughly 30 common brand → generic mappings — and unmapped brand
+names remain a known weakness. RxNorm integration is deferred to V2; until
+then, brand/generic ambiguity is a documented limitation (see below).
+
 ### Reporting Odds Ratio (ROR)
 
 For each drug **X** and reaction **Y**, a 2×2 contingency table is constructed:
@@ -161,25 +171,53 @@ $$\text{SE} = \sqrt{\frac{1}{a} + \frac{1}{b} + \frac{1}{c} + \frac{1}{d}}$$
 
 $$\text{CI} = \exp\!\left(\ln(\text{ROR}) \pm 1.96 \cdot \text{SE}\right)$$
 
-**Signal threshold:** ROR lower 95% CI > 1 (strict).
+**Signal threshold:** ROR lower 95% CI > 1 (strict inequality), per
+Rothman 2004.
 
 ### Proportional Reporting Ratio (PRR)
 
 $$\text{PRR} = \frac{a\,/\,(a+b)}{c\,/\,(c+d)}$$
 
-The associated chi-squared statistic uses the exact Pearson formula with
-no Yates' continuity correction:
+The associated chi-squared statistic uses the exact Pearson formula:
 
 $$\chi^2 = \frac{N \cdot (ad - bc)^2}{(a+b)(c+d)(a+c)(b+d)}$$
 
-**Signal thresholds:** PRR ≥ 2 **and** *n* ≥ 3 **and** χ² ≥ 4.
+**Signal thresholds (EVANS criterion):** PRR ≥ 2 **and** *n* ≥ 3 **and**
+χ² ≥ 4, all inclusive, all required (Evans 2001).
 
-### Zero-cell handling
+### Background denominator
 
-Pairs where any contingency cell equals zero are excluded from analysis.
-Zero cells make the log-normal SE undefined for ROR and produce degenerate
-PRR values. A Haldane correction (+0.5 to all cells) would recover these
-pairs but introduces bias; exclusion is the more conservative choice for MVP.
+"All other drugs" is taken globally — every drug in `adverse_events`
+other than the target drug, across the full ingested date range. No
+stratification by ATC class, indication, or time window is applied. This
+is the simplest defensible choice for an MVP. Stratified analysis
+(Bate-style sub-group ROR) is V2.
+
+### Zero-cell handling (Yates 0.5)
+
+When any contingency cell is zero, the default behaviour is to apply
+Yates' 0.5 continuity correction (Rothman 2004 §15) — 0.5 is added to
+every cell before computing — and return a finite estimate. Strict-mode
+callers pass `continuity_correction=False` to
+`analysis.disproportionality` and get `None` instead.
+
+Two cases bypass Yates and always return `None`:
+
+- `a + b == 0` — the drug is entirely absent from the dataset.
+- `c + d == 0` — there are no comparator drugs.
+
+`n_reports` always reflects the **observed** `a`, not the corrected
+value, so Yates does not promote noise into flagged signals — the EVANS
+`a ≥ 3` floor still gates `flag_signal`.
+
+### Cell-inclusion floor
+
+`compute_all_signals` skips any pair with observed `a < min_reports`
+(default 3) before computing anything — the EVANS-criterion floor for
+stable PRR estimation. This is what keeps the signal table finite on
+FAERS-scale data: a naïve `n_drugs × n_reactions` matrix is roughly
+10⁸ cells, and the vast majority of those cells carry only one or two
+reports of noise.
 
 ---
 
@@ -300,26 +338,61 @@ plt.show()
 
 ## Limitations
 
-- **Voluntary reporting bias.** FAERS data is submitted spontaneously — serious,
-  novel, or widely-publicised reactions are over-reported relative to their true
-  incidence. Disproportionality signals reflect the reporting rate, not the
-  underlying pharmacological risk.
+FAERS is a spontaneous-reporting database. Disproportionality on FAERS is
+useful for **hypothesis generation** and is not causal evidence. Signals
+must be read with these constraints in mind:
 
-- **MedDRA term inconsistency.** Adverse reaction terms are entered as free text
-  and normalised to MedDRA preferred terms by OpenFDA. The same clinical event
-  may appear under multiple terms (e.g. "bleeding" vs "haemorrhage"), leading
-  to undercounting. No MedDRA synonym mapping has been applied in this analysis.
+- **Notoriety bias.** Recent media coverage inflates reporting rates;
+  the resulting signal reflects attention, not pharmacology.
 
-- **No causality inference.** A flagged signal indicates that a drug-reaction
-  pair is reported more often than expected given the background rate. It does
-  not establish that the drug *caused* the reaction. Confounding by indication,
-  co-medications, and patient demographics are not controlled for.
+- **Indication confounding.** A drug's indication can co-occur with the
+  reaction independent of the drug — e.g. an anti-emetic flagged for the
+  cancer it treats.
 
-- **Small background population.** The current database contains reports for
-  only `{python} n_drugs` drugs (`{python} ', '.join(drug_list)`).
-  Disproportionality estimates are most reliable when the background population
-  is large and diverse. Signals computed against a narrow background are
-  statistically noisier and should be interpreted cautiously.
+- **Weber effect.** Reporting peaks 1–2 years after launch and decays
+  thereafter; early-cycle signals are not directly comparable to
+  late-cycle ones.
+
+- **Masking.** A common drug-event pair can suppress signal detection
+  for related, less-reported pairs in the same comparator pool.
+
+- **Stimulated reporting.** Litigation, regulatory letters, or
+  social-media campaigns spike reports without any underlying
+  epidemiological change.
+
+- **No exposure denominator.** FAERS records report counts, not
+  patient-exposure denominators. ROR is *reporting* odds, not incidence.
+
+- **Brand-vs-generic ambiguity.** Mitigated by the alias table at
+  [`pipeline/drug_aliases.json`](../pipeline/drug_aliases.json) but not
+  eliminated — unmapped brands still split signals across multiple
+  drug-name buckets. RxNorm integration is V2.
+
+- **Small background population (this snapshot).** The current database
+  contains reports for only `{python} n_drugs` drugs
+  (`{python} ', '.join(drug_list)`). Disproportionality estimates are
+  most reliable when the background population is large and diverse;
+  signals computed against a narrow background are statistically noisier
+  and should be interpreted cautiously. This is a property of the
+  ingested sample, not of FAERS as a whole.
+
+- **MedDRA term inconsistency.** Adverse reaction terms are entered as
+  free text and normalised to MedDRA preferred terms by OpenFDA. The
+  same clinical event may appear under multiple terms (e.g. "bleeding"
+  vs "haemorrhage"), leading to undercounting. No MedDRA synonym mapping
+  has been applied in this analysis.
+
+---
+
+## References
+
+- Rothman KJ, Lanes S, Sacks ST. *The reporting odds ratio and its
+  advantages over the proportional reporting ratio.* Pharmacoepidemiol
+  Drug Saf. 2004; 13: 519–523. <https://doi.org/10.1002/pds.1001>
+- Evans SJW, Waller PC, Davis S. *Use of proportional reporting ratios
+  (PRRs) for signal generation from spontaneous adverse drug reaction
+  reports.* Pharmacoepidemiol Drug Saf. 2001; 10: 483–486.
+  <https://doi.org/10.1002/pds.677>
 
 ---
 
