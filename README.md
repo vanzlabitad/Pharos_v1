@@ -72,7 +72,7 @@ For the full methodology with formulas, zero-cell handling, and FAERS-specific l
 
 ```bash
 # Clone
-git clone https://github.com/Vanz23-23/Pharos_v1.git
+git clone https://github.com/vanzlabitad/Pharos_v1.git
 cd Pharos_v1
 
 # Install secret-scanner hook
