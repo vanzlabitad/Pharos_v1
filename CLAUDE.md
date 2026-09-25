@@ -325,7 +325,7 @@ Output only the summary. No preamble.
 ```
 
 Pipeline:
-1. Fetch latest OpenFDA data (with retry on 429; raises after 3 attempts)
+1. Fetch latest OpenFDA data, newest first (`sort=receivedate:desc`; retry on 429 or timeout; raises after 3 retries; any drug returning no rows aborts the run)
 2. Update SQLite
 3. Recompute ROR/PRR scores
 4. Export static JSON to `/dashboard/public/data/`
@@ -405,7 +405,7 @@ Recruiter-facing copy (CV framing, LinkedIn entry, signal table) lives in [`docs
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | OpenFDA schema drift | Med | Med | Live integration tests in `analysis/tests/test_live.py`; weekly cron failure surfaces drift loudly. |
-| OpenFDA 429 rate-limit | Low | Med | Exponential-backoff retry in `pipeline.ingest._fetch_page` (1s → 2s → 4s, then raise). |
+| OpenFDA 429 rate-limit / timeout | Low | Med | Exponential-backoff retry in `pipeline.ingest._fetch_page` (1s → 2s → 4s, then raise). |
 | `signals.json` size growth | Med | Med | EVANS floor (`min_reports = 3`) bounds row count; rotate to blob storage if file > 5 MB. |
 | Vercel deploy size cap | Low | High | Same trigger as JSON growth. Hard cap on free tier ~100 MB. |
 | Gemini API monthly cost | Low | Low | Capped at ~200 summaries / refresh (§10). Free tier currently covers full weekly load; one-time cost per refresh if it ever exceeds. |
