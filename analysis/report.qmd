@@ -92,7 +92,7 @@ n_pairs      = len(signals)
 n_flagged    = len(flagged)
 report_date  = date.today().strftime("%d %B %Y")
 
-# Per-drug reporting window (each drug is capped at its newest N reports)
+# Per-drug reporting window (each drug is capped at ~N newest report-reaction rows)
 _fmt = lambda s: pd.to_datetime(s).strftime("%d %b %Y")
 window_text = "; ".join(
     f"{r.drug_name.capitalize()} {_fmt(r.first)} – {_fmt(r.last)} "
@@ -385,7 +385,8 @@ must be read with these constraints in mind:
   ingested sample, not of FAERS as a whole.
 
 - **Unequal reporting windows (this snapshot).** Each drug is capped at
-  its most recent 10,000 reports, so high-volume drugs cover a shorter
+  roughly its most recent 10,000 report–reaction rows (one row per
+  reaction per report), so high-volume drugs cover a shorter
   calendar window than low-volume ones. Current windows:
   `{python} window_text`. The comparator pool therefore mixes reports
   from different periods, and any time-varying reporting (seasonal
