@@ -20,6 +20,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 from analysis.disproportionality import (
+    flag_signals_df,
     compute_all_signals,
     compute_ror,
     compute_prr,
@@ -310,6 +311,38 @@ class TestFlagSignal:
 
 
 # ── compute_all_signals ──────────────────────────────────────────────────────
+
+class TestFlagSignalsDf:
+    """flag_signals_df must agree with flag_signal row-for-row."""
+
+    ROWS = [
+        # ror_lower, prr, n_reports, chi_squared, expected
+        (1.5, 3.0, 10, 12.0, True),
+        (1.01, 2.0, 3, 4.0, True),     # all boundaries inclusive except ROR
+        (1.0, 3.0, 10, 12.0, False),   # ROR lower bound must be strictly > 1
+        (1.5, 1.99, 10, 12.0, False),
+        (1.5, 3.0, 2, 12.0, False),
+        (1.5, 3.0, 10, 3.99, False),
+        (float("nan"), 3.0, 10, 12.0, False),
+        (1.5, None, 10, 12.0, False),
+    ]
+
+    def test_matches_flag_signal(self) -> None:
+        df = pd.DataFrame(
+            [r[:4] for r in self.ROWS],
+            columns=["ror_lower", "prr", "n_reports", "chi_squared"],
+        )
+        result = flag_signals_df(df)
+        assert result.dtype == bool
+        assert result.tolist() == [r[4] for r in self.ROWS]
+        for (lo, prr, n, chi, _), got in zip(self.ROWS[:6], result):
+            row = {"ror_lower": lo, "prr": prr, "n_reports": n, "chi_squared": chi}
+            assert got == flag_signal(row, row)
+
+    def test_empty_frame(self) -> None:
+        df = pd.DataFrame(columns=["ror_lower", "prr", "n_reports", "chi_squared"])
+        assert flag_signals_df(df).empty
+
 
 class TestComputeAllSignals:
     """End-to-end behaviour of the batch signal computation against an

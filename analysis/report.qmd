@@ -49,7 +49,7 @@ import matplotlib.ticker as mticker
 from sqlalchemy import text
 
 from pipeline.db import get_engine
-from analysis.disproportionality import compute_all_signals
+from analysis.disproportionality import compute_all_signals, flag_signals_df
 
 # ── Load data ────────────────────────────────────────────────────────────────
 DB_PATH = _root / "db" / "pharos.db"
@@ -70,13 +70,8 @@ with engine.connect() as conn:
 # always reflects the current state of adverse_events, not cached scores.
 signals = compute_all_signals(engine)
 
-# Flag signals: all four criteria from CLAUDE.md §8
-signals["is_signal"] = (
-    (signals["ror_lower"] > 1.0)
-    & (signals["prr"] >= 2.0)
-    & (signals["n_reports"] >= 3)
-    & (signals["chi_squared"] >= 4.0)
-)
+# Flag signals: all four criteria from CLAUDE.md §8, via flag_signal
+signals["is_signal"] = flag_signals_df(signals)
 
 flagged = (
     signals[signals["is_signal"]]
