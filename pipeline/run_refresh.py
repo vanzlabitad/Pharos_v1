@@ -85,16 +85,17 @@ def main() -> int:
         n = insert_adverse_events(engine, clean)
         ingested[drug] = n
 
-    if not ingested:
-        logger.error("No drugs were successfully ingested — aborting")
+    # Any missing drug aborts the run. Continuing would silently drop the
+    # drug from signals.json while its stale per-drug JSON and summary stay
+    # on the dashboard (CLAUDE.md §11: loud failure over quiet staleness).
+    if failed:
+        logger.error("Failed drugs (no data or all rows dropped): %s — aborting", failed)
         return 1
 
     logger.info(
         "Ingestion complete: %s",
         ", ".join(f"{d}={n}" for d, n in ingested.items()),
     )
-    if failed:
-        logger.warning("Failed drugs (no data or all rows dropped): %s", failed)
 
     # ── Step 2: Recompute signals ────────────────────────────────────────────
     logger.info("Computing ROR/PRR signals...")

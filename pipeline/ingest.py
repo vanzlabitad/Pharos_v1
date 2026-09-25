@@ -24,24 +24,34 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.fda.gov/drug/event.json"
 _PAGE_SIZE = 1000   # OpenFDA maximum per request
-_REQUEST_TIMEOUT = 10   # seconds
+_REQUEST_TIMEOUT = 30   # seconds — sorted queries on high-volume drugs are slow
 
-# Retry policy on HTTP 429 (rate limit). Three attempts with exponential
-# backoff (1s, 2s, 4s) before raising. Failure is loud — no partial-data
-# fallback — so the cron exits non-zero and GitHub Actions emails the user.
-_RATE_LIMIT_RETRY_DELAYS = (1, 2, 4)
+# Newest reports first. Without an explicit sort OpenFDA returns records in
+# index order (oldest first), so a capped fetch only ever saw ~2014 data.
+_SORT = "receivedate:desc"
+
+# Retry policy on HTTP 429 (rate limit) and request timeouts. Three retries
+# with exponential backoff (1s, 2s, 4s) before raising. Failure is loud — no
+# partial-data fallback — so the cron exits non-zero and GitHub Actions
+# emails the user.
+_RETRY_DELAYS = (1, 2, 4)
 
 
 class RateLimitExceededError(RuntimeError):
     """Raised when OpenFDA returns 429 after all retries are exhausted."""
 
 
+class FetchTimeoutError(RuntimeError):
+    """Raised when OpenFDA times out after all retries are exhausted."""
+
+
 def fetch_adverse_events(drug_name: str, max_records: int = 5000) -> pd.DataFrame:
     """Fetch adverse event reports for drug_name from OpenFDA FAERS.
 
-    Paginates until max_records reached or the API is exhausted.
-    Returns a raw DataFrame; never raises — logs failures and returns
-    whatever was collected (may be empty on complete failure).
+    Paginates newest-first (by receivedate) until max_records reached or
+    the API is exhausted. Raises on persistent 429s or timeouts; other
+    failures are logged and whatever was collected is returned (may be
+    empty on complete failure).
 
     Args:
         drug_name:   Drug name as it appears in OpenFDA (case-insensitive).
@@ -88,12 +98,14 @@ def _fetch_page(
 ) -> list[dict] | None:
     """Fetch one page of results. Returns list of row dicts, or None on failure.
 
-    On HTTP 429, retries with exponential backoff (1s → 2s → 4s) before
-    raising ``RateLimitExceededError``. Other failures (timeout, network,
-    non-2xx, malformed JSON) return None and stop pagination for this drug.
+    On HTTP 429 or a request timeout, retries with exponential backoff
+    (1s → 2s → 4s) before raising ``RateLimitExceededError`` or
+    ``FetchTimeoutError``. Other failures (network, non-2xx, malformed JSON)
+    return None and stop pagination for this drug.
     """
     params: dict = {
         "search": f'patient.drug.medicinalproduct:"{drug_name}"',
+        "sort": _SORT,
         "limit": limit,
         "skip": skip,
     }
@@ -101,22 +113,21 @@ def _fetch_page(
         params["api_key"] = api_key
 
     response = None
-    for attempt, delay in enumerate((0,) + _RATE_LIMIT_RETRY_DELAYS):
+    last_failure = ""
+    for attempt, delay in enumerate((0,) + _RETRY_DELAYS):
         if delay:
             logger.warning(
-                "OpenFDA 429 on '%s' (skip=%d) — retry %d/%d after %ds",
-                drug_name, skip, attempt, len(_RATE_LIMIT_RETRY_DELAYS), delay,
+                "OpenFDA %s on '%s' (skip=%d) — retry %d/%d after %ds",
+                last_failure, drug_name, skip, attempt, len(_RETRY_DELAYS), delay,
             )
             time.sleep(delay)
 
         try:
             response = requests.get(_BASE_URL, params=params, timeout=_REQUEST_TIMEOUT)
         except requests.Timeout:
-            logger.warning(
-                "Timeout fetching page skip=%d for '%s' — stopping pagination",
-                skip, drug_name,
-            )
-            return None
+            response = None
+            last_failure = "timeout"
+            continue
         except requests.RequestException as exc:
             logger.warning(
                 "Network error fetching page skip=%d for '%s': %s",
@@ -126,11 +137,17 @@ def _fetch_page(
 
         if response.status_code != 429:
             break
+        last_failure = "429"
     else:
-        # Loop exhausted without breaking — every attempt was a 429.
+        # Loop exhausted without breaking — every attempt was a 429 or timeout.
+        if last_failure == "timeout":
+            raise FetchTimeoutError(
+                f"OpenFDA timed out for '{drug_name}' (skip={skip}) after "
+                f"{len(_RETRY_DELAYS)} retries"
+            )
         raise RateLimitExceededError(
             f"OpenFDA returned 429 for '{drug_name}' (skip={skip}) after "
-            f"{len(_RATE_LIMIT_RETRY_DELAYS)} retries"
+            f"{len(_RETRY_DELAYS)} retries"
         )
 
     assert response is not None  # for type-checker; loop guarantees this
