@@ -201,6 +201,7 @@ be read with these constraints in mind:
 - **Stimulated reporting.** Litigation, regulatory letters, or social-media campaigns spike reports without underlying epidemiological change.
 - **No exposure denominator.** FAERS records report counts, not patient-exposure denominators — ROR is *reporting* odds, not incidence.
 - **Brand-vs-generic ambiguity.** Mitigated by the alias table but not eliminated; unmapped brands still split signals.
+- **Unequal reporting windows.** Ingestion caps each drug at its newest 10,000 reports (`MAX_RECORDS_PER_DRUG`), so high-volume drugs span a shorter calendar window than low-volume ones and the comparator pool mixes periods. The Quarto report prints each drug's actual window. A fixed shared date window is V2.
 
 These are reproduced in the Quarto report alongside the signal outputs.
 
