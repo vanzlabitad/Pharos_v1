@@ -63,7 +63,7 @@ SQLite database
     ↓
 Weekly GitHub Actions cron → static JSON export
     ↓
-Vercel (Next.js dashboard + Recharts)
+Vercel (Next.js dashboard + custom SVG charts)
          ↓
 Gemini API (plain-language summaries, per drug profile)
 ```
@@ -81,7 +81,7 @@ Gemini API (plain-language summaries, per drug profile)
 | Database | SQLite (Postgres migration triggered when row count > 10M or query p95 > 500 ms) |
 | Analysis | Python (scipy, statsmodels) + Quarto (Python engine) |
 | Refresh | GitHub Actions cron (weekly) → static JSON |
-| Frontend | Next.js + Recharts |
+| Frontend | Next.js + Tailwind; charts are hand-built SVG (`dashboard/components/charts/`), no chart library |
 | Deployment | Vercel (free tier) |
 | AI summaries | Gemini API (`gemini-2.5-flash` — pinned; can be re-pinned per refresh run) |
 
@@ -220,12 +220,13 @@ These are reproduced in the Quarto report alongside the signal outputs.
 - [x] Weekly GitHub Actions cron → static JSON export — `.github/workflows/refresh.yml`, `pipeline/export.py`
 - [x] Unit tests for analysis functions (pytest) — 40 tests in `analysis/tests/`
 - [ ] Quarto report: methodology + signal outputs (file exists at `analysis/report.qmd`; methodology section to be expanded — see §8)
-- [ ] Next.js dashboard (only `dashboard/public/data/*.json` exists; no app scaffold yet):
-  - Drug search
-  - Adverse event profile view
-  - Signal score view (ROR/PRR with CI visualisation)
-  - **AI-generated plain-language summaries per drug profile (Gemini API) — see §10**
-- [ ] Clean GitHub README with architecture diagram
+- [x] Next.js dashboard — `dashboard/app/`, `dashboard/components/`:
+  - [x] Drug search — `components/forms/search-bar.tsx` on `/explore`
+  - [x] Adverse event profile view — `/drug/[name]`
+  - [x] Signal score view (ROR/PRR with CI visualisation) — `/drug/[name]/signals`, forest plot in `components/charts/forest/`
+  - [x] **AI-generated plain-language summaries per drug profile (Gemini API) — see §10**
+  - [ ] Footer link to the Quarto report (`/report.html`) — see §17
+- [x] Clean GitHub README with architecture diagram — `README.md` (Mermaid)
 
 ### V2 (post-August)
 - [ ] ClinicalTrials.gov ingestion + trial landscape view
@@ -359,7 +360,7 @@ pharos/
 ├── db/
 │   ├── schema.sql                  # Source of truth (see §7)
 │   └── pharos.db                   # gitignored
-├── dashboard/                      # Next.js frontend (scaffold pending)
+├── dashboard/                      # Next.js frontend (app/, components/, lib/)
 │   └── public/data/                # Static JSON, committed weekly
 ├── .github/workflows/
 │   └── refresh.yml
@@ -443,7 +444,7 @@ The Quarto report at [`analysis/report.qmd`](analysis/report.qmd) is the human-r
 | Question | Decision |
 |---|---|
 | Target audience | Computational biotech + general public |
-| Frontend | Next.js + Recharts |
+| Frontend | Next.js + custom SVG charts (replaced the originally planned Recharts) |
 | Hosting | Vercel (free tier; trigger in §5 for migration) |
 | Refresh strategy | Weekly GitHub Actions → static JSON |
 | NLP in MVP | No — V2 only |
