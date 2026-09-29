@@ -116,6 +116,25 @@ def flag_signal(ror_result: dict | None, prr_result: dict | None) -> bool:
     )
 
 
+def flag_signals_df(df: pd.DataFrame) -> pd.Series:
+    """Apply ``flag_signal`` to every row of a signals DataFrame.
+
+    Expects columns ror_lower, prr, n_reports, chi_squared. This is the
+    only place a table of signals gets flagged, so the export and the
+    Quarto report cannot drift from ``flag_signal``.
+    """
+    if df.empty:
+        return pd.Series(dtype=bool, index=df.index)
+    cols = ["ror_lower", "prr", "n_reports", "chi_squared"]
+    complete = df[cols].notna().all(axis=1)
+    records = df[cols].to_dict("records")
+    return pd.Series(
+        [ok and flag_signal(r, r) for ok, r in zip(complete, records)],
+        index=df.index,
+        dtype=bool,
+    )
+
+
 def compute_all_signals(
     engine: Engine,
     *,
